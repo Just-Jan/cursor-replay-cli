@@ -199,8 +199,7 @@ final class TerminalScreen: Sendable {
                         color: capabilities.color, unicode: capabilities.unicode
                     )
                     if frame != lastFrame {
-                        let body = frame.replacingOccurrences(of: "\n", with: "\u{1B}[K\r\n")
-                        try write("\u{1B}[H" + body + "\u{1B}[K\u{1B}[J")
+                        try write(changedRows(previous: lastFrame, current: frame, height: size.height))
                         lastFrame = frame
                     }
                 case .singleLine:
@@ -329,13 +328,15 @@ final class TerminalScreen: Sendable {
     }
 
     private enum Tone {
-        case normal, title, muted, recording, playing, error
+        case normal, title, muted, controls, ready, recording, playing, error
 
         var escape: String {
             switch self {
             case .normal: ""
             case .title: "\u{1B}[1m"
             case .muted: "\u{1B}[2m"
+            case .controls: "\u{1B}[97m"
+            case .ready: "\u{1B}[32m"
             case .recording: "\u{1B}[31m"
             case .playing: "\u{1B}[36m"
             case .error: "\u{1B}[1;31m"
@@ -346,7 +347,22 @@ final class TerminalScreen: Sendable {
     private struct Row {
         var text: String
         var tone: Tone = .normal
-        var priority: Int
+    }
+
+    static func changedRows(previous: String?, current: String, height: Int) -> String {
+        guard height > 0 else { return "" }
+        let old = previous?.components(separatedBy: "\n") ?? []
+        let new = current.components(separatedBy: "\n")
+        let count = min(height, max(old.count, new.count))
+        var output = ""
+        for index in 0..<count {
+            let before = index < old.count ? old[index] : nil
+            let after = index < new.count ? new[index] : ""
+            if before != after {
+                output += "\u{1B}[\(index + 1);1H" + after + "\u{1B}[K"
+            }
+        }
+        return output
     }
 
     /// A pure frame: no cursor movement, environment reads, terminal I/O, or clock reads.
@@ -367,6 +383,7 @@ final class TerminalScreen: Sendable {
         let inset = String(repeating: " ", count: (available - contentWidth) / 2)
         let tone: Tone
         switch state.phase {
+        case .ready: tone = .ready
         case .recording: tone = .recording
         case .playing: tone = .playing
         case .error: tone = .error
@@ -376,58 +393,59 @@ final class TerminalScreen: Sendable {
         var rows: [Row]
         if height <= 2 {
             rows = [
-                Row(text: summary(state, now: now, frame: frame, unicode: unicode), tone: tone, priority: 0),
-                Row(text: controls(state, width: contentWidth, compact: true), tone: .muted, priority: 1)
+                Row(text: summary(state, now: now, frame: frame, unicode: unicode), tone: tone),
+                Row(text: controls(state, width: contentWidth, compact: true), tone: .controls)
             ]
+            rows = Array(rows.prefix(height))
         } else {
             var detail = status(state, now: now, frame: frame, unicode: unicode)
             if state.phase == .recording, let count = state.eventCount {
                 detail += "   \(max(0, count)) events"
             }
-            rows = [
-                Row(text: sanitized(title), tone: .title, priority: 5),
-                Row(text: "", priority: 9),
-                Row(text: detail, tone: tone, priority: 0),
-                Row(text: friendlyMessage(state), tone: state.phase == .error ? .error : .normal, priority: 1)
-            ]
-            if state.phase == .playing, let duration = finiteDuration(state), duration > 0 {
+            let count = min(10, height)
+            rows = Array(repeating: Row(text: ""), count: count)
+            let footer = count - 1
+            let statusRow = count >= 8 ? 2 : 0
+            let fileRow = count >= 8 ? footer - 2 : nil
+            let progressRow: Int? = count >= 9 ? footer - 4 : (count >= 6 && count < 8 ? footer - 2 : nil)
+            let messageStart = statusRow + 1
+            let messageEnd = min(progressRow ?? footer, fileRow ?? footer, footer)
+            let messageCount = min(2, max(0, messageEnd - messageStart))
+
+            if count >= 8 { rows[0] = Row(text: sanitized(title), tone: .title) }
+            rows[statusRow] = Row(text: detail, tone: tone)
+            let messages = messageLines(
+                friendlyMessage(state), width: contentWidth, count: messageCount, unicode: unicode
+            )
+            for (offset, message) in messages.enumerated() {
+                rows[messageStart + offset] = Row(text: message, tone: state.phase == .error ? .error : .normal)
+            }
+            if let progressRow, state.phase == .playing,
+               let duration = finiteDuration(state), duration > 0 {
                 let fraction = min(1, elapsed(state, now: now) / duration)
                 let length = min(24, max(0, contentWidth - 9))
                 if length > 0 {
                     let filled = Int((Double(length) * fraction).rounded(.down))
                     let bar = String(repeating: unicode ? "━" : "=", count: filled)
                         + String(repeating: unicode ? "·" : ".", count: length - filled)
-                    rows.append(Row(
+                    rows[progressRow] = Row(
                         text: "[\(bar)] \(Int((fraction * 100).rounded(.down)))%",
-                        tone: .muted, priority: 4
-                    ))
+                        tone: .muted
+                    )
                 }
             }
-            if let recording = savedName(state) {
-                rows.append(Row(text: "", priority: 9))
-                rows.append(Row(text: "Last: " + recording, tone: .muted, priority: 6))
+            if let fileRow, let recording = savedName(state) {
+                rows[fileRow] = Row(text: "Last: " + recording, tone: .muted)
             }
-            rows.append(Row(text: "", priority: 9))
-            rows.append(Row(
+            rows[footer] = Row(
                 text: controls(state, width: contentWidth, compact: height < 6),
-                tone: .muted, priority: 2
-            ))
-            if contentWidth >= 32, height >= 6 {
-                rows.append(Row(text: "Ctrl+C also quits.", tone: .muted, priority: 3))
-            }
+                tone: .controls
+            )
         }
 
-        let selected = rows.enumerated()
-            .sorted { lhs, rhs in
-                lhs.element.priority == rhs.element.priority
-                    ? lhs.offset < rhs.offset : lhs.element.priority < rhs.element.priority
-            }
-            .prefix(height)
-            .sorted { $0.offset < $1.offset }
-            .map(\.element)
-        let top = min(3, max(0, (height - selected.count) / 3))
+        let top = min(3, max(0, (height - rows.count) / 3))
         var lines = Array(repeating: "", count: top)
-        for row in selected {
+        for row in rows {
             let text = clipped(
                 row.text, width: contentWidth, unicode: unicode,
                 isError: state.phase == .error && row.tone == .error
@@ -441,6 +459,43 @@ final class TerminalScreen: Sendable {
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func messageLines(_ text: String, width: Int, count: Int, unicode: Bool) -> [String] {
+        guard count > 0 else { return [] }
+        let characters = Array(text)
+        var start = 0
+        var lines: [String] = []
+        for row in 0..<count where start < characters.count {
+            if row == count - 1 {
+                lines.append(clipped(String(characters[start...]), width: width, unicode: unicode))
+                break
+            }
+            var end = start
+            var cells = 0
+            var lastSpace: Int?
+            while end < characters.count {
+                let next = cellWidth(characters[end])
+                if cells + next > width { break }
+                cells += next
+                if characters[end] == " " { lastSpace = end }
+                end += 1
+            }
+            if end == characters.count {
+                lines.append(String(characters[start..<end]))
+                break
+            }
+            if end == start {
+                lines.append(clipped(String(characters[start]), width: width, unicode: unicode))
+                start += 1
+            } else {
+                let cut = lastSpace ?? end
+                lines.append(String(characters[start..<cut]))
+                start = cut
+                while start < characters.count, characters[start] == " " { start += 1 }
+            }
+        }
+        return lines
     }
 
     private static func status(
@@ -513,11 +568,11 @@ final class TerminalScreen: Sendable {
             action = ""
             keys = "Q"
         }
-        if width < 20 { return keys + " ^C" }
+        if width < 20 { return keys }
         if compact || width < 40 {
-            return keys.split(separator: " ").map { "[\($0)]" }.joined(separator: " ") + " Ctrl+C"
+            return keys.split(separator: " ").map { "[\($0)]" }.joined(separator: " ")
         }
-        return (action.isEmpty ? "" : action + "   ") + "[Q] Quit"
+        return action.padding(toLength: 24, withPad: " ", startingAt: 0) + "[Q] Quit"
     }
 
     private static func elapsed(_ state: TerminalViewState, now: TimeInterval) -> TimeInterval {

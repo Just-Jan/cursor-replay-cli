@@ -169,7 +169,17 @@ recorder callback or playback scheduling thread. Workers may publish small
 state updates; they must not perform UI I/O or wait for a rendered frame.
 Keep state updates lightweight enough not to disturb event timing.
 
-ANSI-capable terminals use an alternate screen and hidden cursor while active.
+ANSI-capable terminals use an alternate screen and hide only the terminal text
+caret while active, restoring it on exit. Shortcut rows are white when color is
+enabled. The Ctrl+C hint sentence is not shown; the shortcut still works.
+The activity/message, progress, and filename slots reserve fixed rows, so changes
+in phase, message length, or file availability cannot move the shortcut footer.
+The quit control also keeps a fixed column on full-width layouts.
+Animation writes only rows whose contents changed. Do not clear and repaint the
+whole terminal on each tick or rewrite the static shortcut footer for a dot pulse.
+Terminal caret visibility is separate from the macOS mouse pointer. The renderer
+must not post extra mouse events, warp the pointer, or change global hide counts
+merely to change mouse-pointer visibility.
 `NO_COLOR` disables color without changing the controls or error meaning.
 `TERM=dumb` falls back to a single-line terminal presentation; redirected
 presentation output is a short plain summary, not an animation. The menu still

@@ -3,6 +3,14 @@ import Testing
 @testable import MouseRecorderCLI
 
 struct TerminalScreenTests {
+    @Test func readyStatusIsGreenAndRespectsNoColor() {
+        let state = TerminalViewState(lastRecording: "session.json")
+        let colored = render(state, color: true)
+        #expect(colored.contains("\u{1B}[32mReady\u{1B}[0m"))
+        #expect(colored.contains("\u{1B}[97m[R] Record"))
+        #expect(!render(state, color: false).contains("\u{1B}[32m"))
+    }
+
     private func render(
         _ state: TerminalViewState = TerminalViewState(),
         width: Int = 80, height: Int = 24, frame: Int = 0,
@@ -22,7 +30,7 @@ struct TerminalScreenTests {
         #expect(empty.contains("[R] Record"))
         #expect(!empty.contains("[P] Play"))
         #expect(empty.contains("[Q] Quit"))
-        #expect(empty.contains("Ctrl+C"))
+        #expect(!empty.contains("Ctrl+C"))
 
         state.lastRecording = "/some/private/folder/session.json"
         let saved = render(state)
@@ -106,7 +114,7 @@ struct TerminalScreenTests {
         }
         #expect(render(state, width: 0).isEmpty)
         #expect(render(state, height: -1).isEmpty)
-        #expect(render(state, width: 19, height: 3).contains("S Q ^C"))
+        #expect(render(state, width: 19, height: 3).contains("S Q"))
     }
 
     @Test func wideGraphemesAndCombiningMarksAreClippedAsWholeCharacters() {
@@ -177,5 +185,105 @@ struct TerminalScreenTests {
         #expect(render(state, now: 99).contains("00:00"))
         #expect(render(state, now: .greatestFiniteMagnitude).contains("99:59:59"))
         #expect(render(state).contains("0 events"))
+    }
+
+    @Test func quitShortcutRemainsAvailableWithoutAnExtraHintSentence() {
+        for phase: TerminalPhase in [.ready, .countdown, .recording, .playing, .saving, .error] {
+            let state = TerminalViewState(phase: phase, lastRecording: "session.json")
+            for width in [19, 32, 80] {
+                let output = render(state, width: width)
+                #expect(output.contains("Q"))
+                #expect(!output.contains("Ctrl+C"))
+                #expect(!output.contains("^C"))
+            }
+        }
+    }
+
+    @Test func shortcutRowsAreWhiteInEveryInteractivePhase() {
+        for phase: TerminalPhase in [.ready, .countdown, .recording, .playing, .saving, .error] {
+            let state = TerminalViewState(phase: phase, lastRecording: "session.json")
+            let styled = render(state, color: true)
+            let row = styled.components(separatedBy: "\n").first { $0.contains("[Q]") }
+            #expect(row?.contains("\u{1B}[97m") == true)
+            #expect(row?.hasSuffix("\u{1B}[0m") == true)
+            #expect(!render(state, color: false).contains("\u{1B}[97m"))
+        }
+    }
+
+    @Test func shortcutFooterStaysOnTheSameRowAcrossStatesAndContentChanges() {
+        let phases: [TerminalPhase] = [.ready, .countdown, .recording, .playing, .saving, .error]
+        for width in [8, 19, 32, 80] {
+            for height in [3, 4, 6, 8, 9, 10, 24] {
+                var positions: [Int] = []
+                for (index, phase) in phases.enumerated() {
+                    let state = TerminalViewState(
+                        phase: phase,
+                        message: index.isMultiple(of: 2) ? "Short." : String(repeating: "A much longer message ", count: 20),
+                        lastRecording: index.isMultiple(of: 2) ? nil : "session.json",
+                        duration: phase == .playing ? 24 : nil
+                    )
+                    let lines = render(state, width: width, height: height).components(separatedBy: "\n")
+                    if let footer = lines.lastIndex(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
+                        positions.append(footer)
+                        #expect(lines[footer].contains("Q"))
+                    } else {
+                        Issue.record("The shortcut footer was missing.")
+                    }
+                }
+                #expect(Set(positions).count == 1)
+            }
+        }
+    }
+
+    @Test func messageAreaWrapsWithoutDisplacingTheProgressOrFooter() {
+        let short = TerminalViewState(phase: .playing, message: "Short.", duration: 24)
+        let long = TerminalViewState(
+            phase: .playing,
+            message: "A recording was saved with a note. This extra detail belongs in the fixed message area.",
+            lastRecording: "session.json", duration: 24
+        )
+        let first = render(short).components(separatedBy: "\n")
+        let second = render(long).components(separatedBy: "\n")
+        #expect(first.count == second.count)
+        #expect(first.firstIndex { $0.contains("%") } == second.firstIndex { $0.contains("%") })
+        #expect(first.firstIndex { $0.contains("[S]") } == second.firstIndex { $0.contains("[S]") })
+        #expect(second.contains { $0.contains("A recording was saved with a note.") })
+        #expect(second.contains { $0.contains("fixed message area.") })
+    }
+
+    @Test func quitControlKeepsItsColumnAcrossPhases() {
+        var columns: [Int] = []
+        for phase: TerminalPhase in [.ready, .countdown, .recording, .playing, .saving, .error] {
+            let state = TerminalViewState(phase: phase, lastRecording: "session.json")
+            let line = render(state).components(separatedBy: "\n").last ?? ""
+            if let range = line.range(of: "[Q]") {
+                columns.append(line.distance(from: line.startIndex, to: range.lowerBound))
+            } else {
+                Issue.record("The quit control was missing.")
+            }
+        }
+        #expect(Set(columns).count == 1)
+    }
+
+    @Test func animationRedrawsOnlyTheChangingActivityRow() {
+        let state = TerminalViewState(phase: .recording, message: "Recording.", startedAt: 100, eventCount: 42)
+        let first = render(state, frame: 0)
+        let second = render(state, frame: 1)
+        let patch = TerminalScreen.changedRows(previous: first, current: second, height: 24)
+        #expect(patch.contains("• Recording"))
+        #expect(!patch.contains("Test title"))
+        #expect(!patch.contains("[S]"))
+        #expect(!patch.contains("[Q]"))
+        #expect(!patch.contains("\u{1B}[J"))
+        #expect(!patch.contains("\n"))
+        #expect(TerminalScreen.changedRows(previous: second, current: second, height: 24).isEmpty)
+    }
+
+    @Test func rowChangesClearShorterContentAndRespectViewportHeight() {
+        let patch = TerminalScreen.changedRows(previous: "title\nlong old message\nfooter", current: "title\nshort", height: 3)
+        #expect(patch == "\u{1B}[2;1Hshort\u{1B}[K\u{1B}[3;1H\u{1B}[K")
+        let resized = TerminalScreen.changedRows(previous: "a\nb\nc", current: "x", height: 1)
+        #expect(resized == "\u{1B}[1;1Hx\u{1B}[K")
+        #expect(TerminalScreen.changedRows(previous: "a", current: "b", height: 0).isEmpty)
     }
 }
