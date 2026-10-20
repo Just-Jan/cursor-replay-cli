@@ -1,0 +1,24 @@
+# Inactive template. Move to .github/workflows/ci.yml when enabling GitHub Actions.
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: Unit tests
+        run: scripts/test.sh
+      - name: Release build
+        run: scripts/build.sh
+      - name: Command smoke check
+        run: bin/cursor-replay --help

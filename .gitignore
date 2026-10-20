@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+.DS_Store
+._*
+/bin/
+/dist/
+/recordings/
+/*.json
+/*.tar.gz
+/*.zip
+*.verification.json
