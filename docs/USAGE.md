@@ -35,7 +35,7 @@ Requires **macOS 15+** and Apple's **Swift 6+ Command Line Tools** or Xcode 16+.
 This is a source-built formula: Homebrew compiles a native executable on your Mac;
 there are no prebuilt bottles or third-party runtime dependencies.
 
-After the first [tagged release](../DEVELOPMENT.md#publishing-a-release) is published:
+Install the stable release through this repository's Homebrew tap:
 
 ```sh
 xcode-select --install # only if Command Line Tools are not already installed
@@ -50,11 +50,10 @@ The explicit tap URL is required because this repository is not named
 CLI formula, not a `.app` bundle or a `brew install --cask` package, and it is
 not part of Homebrew's official core repository.
 
-Once these tap files are pushed, you can opt into an unreleased build with
-`brew install --HEAD Just-Jan/cursor-replay-cli/cursor-replay`. Until the first
-release, the formula is intentionally HEAD-only, without a fake release URL or
-checksum. HEAD builds report the source's development version, not a stable
-release guarantee.
+You can opt into an unreleased build with
+`brew install --HEAD Just-Jan/cursor-replay-cli/cursor-replay`.
+HEAD builds report the source's development version, not a stable release
+guarantee. For release maintenance, see [publishing a release](../DEVELOPMENT.md#publishing-a-release).
 
 ```sh
 brew update
@@ -111,8 +110,9 @@ To uninstall, remove `~/.local/bin/cursor-replay`; captures remain untouched.
 Use compiled executables, not `swift SomeFile.swift`. Local builds target the
 Mac's native architecture, not a universal binary. The Homebrew formula builds
 from the same source on Apple Silicon or Intel; CI is configured for both.
-Only the local Apple Silicon build has been exercised during packaging setup;
-remote CI and other architectures must pass before a release is published.
+Release automation requires source builds and Homebrew installation checks on
+macOS 15 Apple Silicon and Intel before publishing. Those checks do not certify
+permissions or physical replay behavior on every Mac.
 Keep source and build caches outside cloud sync, whose file policies can reject
 generated signing artifacts.
 
@@ -314,8 +314,9 @@ grants. Never disable system protections to run a downloaded executable.
 real Homebrew installation tests on macOS 15 Apple Silicon and Intel.
 [Release automation](../.github/workflows/release.yml) publishes source archives,
 checksums, and the stable formula when a matching `vX.Y.Z` tag is pushed.
-These workflows take effect once committed and pushed; their inclusion is not
-evidence of a successful GitHub Actions run or an already published release.
+See the repository's [Actions](https://github.com/Just-Jan/cursor-replay-cli/actions)
+and [Releases](https://github.com/Just-Jan/cursor-replay-cli/releases) for current
+run results and published versions.
 
 For architecture, tests, timing lessons, format compatibility, and release
 checks, continue with [DEVELOPMENT.md](../DEVELOPMENT.md).

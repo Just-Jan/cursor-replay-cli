@@ -55,19 +55,16 @@ Recordings are local JSON files. No third-party runtime dependencies.
 Requires **Swift 6+** through Apple's Command Line Tools or Xcode 16+.
 If needed, install the tools with `xcode-select --install`.
 
-**Pre-release:** Homebrew packaging is prepared, but no release has been published.
-For now, install from source:
+Install the stable release through this project's Homebrew tap:
 
 ```sh
-git clone https://github.com/Just-Jan/cursor-replay-cli.git
-cd cursor-replay-cli
-./scripts/install.sh
-export PATH="$HOME/.local/bin:$PATH"
+brew tap Just-Jan/cursor-replay-cli https://github.com/Just-Jan/cursor-replay-cli
+brew install Just-Jan/cursor-replay-cli/cursor-replay
 cursor-replay doctor
 ```
 
-This installs `~/.local/bin/cursor-replay`. For future terminals, add the
-`export PATH` line above to `~/.zshrc` (or your shell's configuration file).
+Homebrew makes `cursor-replay` available on its normal `PATH`.
+Prefer a local build? See [installation from source](docs/USAGE.md#build-and-run).
 
 In **System Settings > Privacy & Security**, grant **Accessibility** and
 **Input Monitoring** to the app hosting your terminal. If macOS lists the
@@ -102,6 +99,6 @@ Use `record`, `play`, `info`, and `verify` in scripts. For example,
 `cursor-replay play demo.json --speed 0.5 --loop 3` replays a take at half speed
 three times. [Command reference](docs/USAGE.md#command-line-reference).
 
-[Homebrew after publication](docs/USAGE.md#install-with-homebrew) ·
+[Upgrade or uninstall](docs/USAGE.md#install-with-homebrew) ·
 [Troubleshooting](docs/USAGE.md#troubleshooting) ·
 [Report an issue](https://github.com/Just-Jan/cursor-replay-cli/issues)

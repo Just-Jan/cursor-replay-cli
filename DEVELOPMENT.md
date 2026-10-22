@@ -37,7 +37,7 @@ the product rename is not a core API or recording-format migration.
 | `scripts/build.sh` | Release build with an external scratch cache; copies the CLI to `bin/cursor-replay` |
 | `scripts/install.sh` | Builds and installs `~/.local/bin/cursor-replay` without editing `PATH` |
 | `scripts/test.sh` | External-cache Swift Testing runner, including bundled macro-plugin workaround |
-| `Formula/cursor-replay.rb` | Homebrew tap formula; HEAD-only until the first stable release |
+| `Formula/cursor-replay.rb` | Source-built Homebrew formula with release-generated stable metadata |
 | `scripts/prepare-release.rb` | Allowlisted, reproducible committed-source archive, checksum, and stable formula generator |
 | `scripts/test-release.rb` | Release archive, checksum, version/tag, and formula-update regression tests |
 | `scripts/test-homebrew.sh` | Temporary local tap installation/test with cleanup |
@@ -762,7 +762,7 @@ formula. The workflow uses GitHub's built-in `GITHUB_TOKEN`, with `contents: wri
 only in its publishing job. GitHub Actions must be enabled, permitted to use
 `actions/checkout`, and permitted to push the formula update to `main`.
 
-Before the first release, commit and push the packaging changes to `main`.
+Before tagging a release, commit and push its source changes to `main`.
 Use an appropriately authorized login/token for `.github/workflows/` files.
 The initial version is `0.1.0`; for later releases, change
 `AppIdentity.version` in `Sources/MouseRecorderCLI/AppIdentity.swift`, commit,
@@ -791,8 +791,9 @@ produces these files in `dist/preview`:
 | `SHA256SUMS` | Source archive SHA-256; check with `shasum -a 256 -c SHA256SUMS` in the output directory |
 | `cursor-replay.rb` | Stable formula pointing to that archive's future GitHub Release URL |
 
-The formula tracked on `main` starts HEAD-only. The preview's stable formula is
-not meant to be copied back until its source archive has actually been published.
+New taps start HEAD-only; the release workflow adds stable metadata to `main`.
+The preview's stable formula is not meant to be copied back until its source
+archive has actually been published.
 After reviewing the preview, create and push the tag:
 
 ```sh
