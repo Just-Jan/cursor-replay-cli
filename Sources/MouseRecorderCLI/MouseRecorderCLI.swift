@@ -14,6 +14,8 @@ Usage:
   cursor-replay info [file.json]
   cursor-replay verify [file.json] [--countdown 3] [--overwrite]
   cursor-replay doctor
+  cursor-replay --help
+  cursor-replay --version
 
 Default file: recording.json. Default speed: exactly 1.0.
 Menu: S stops and saves; Escape is an alternative. Both return to the menu.
@@ -132,6 +134,10 @@ private final class SignalMonitor {
 struct MouseRecorderCLI {
     static func main() {
         let args = Array(CommandLine.arguments.dropFirst())
+        if args == ["--version"] {
+            print("\(AppIdentity.command) \(AppIdentity.version)")
+            return
+        }
         if args == ["--help"] || args == ["-h"] || args.last == "--help" {
             print(usage)
             return

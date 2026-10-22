@@ -1,0 +1,46 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit or tag to validate
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS 15 (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - name: Toolchain
+        run: swift --version
+      - name: Release tooling tests
+        run: ruby scripts/test-release.rb
+      - name: Unit tests
+        run: scripts/test.sh
+      - name: Release build
+        run: scripts/build.sh
+      - name: Command smoke checks
+        run: |
+          bin/cursor-replay --help
+          bin/cursor-replay --version
+      - name: Prepare source release
+        run: ruby scripts/prepare-release.rb HEAD "$RUNNER_TEMP/release"
+      - name: Install and test with Homebrew
+        run: sh scripts/test-homebrew.sh "$RUNNER_TEMP"/release/*.tar.gz "$RUNNER_TEMP/release/cursor-replay.rb"

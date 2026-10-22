@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="420" viewBox="0 0 1040 420" role="img" aria-labelledby="title description">
+  <title id="title">Cursor Replay CLI: example playback in a terminal</title>
+  <desc id="description">A sample frame from the app's terminal renderer. Playback is at 12 of 48 seconds, or 25 percent, with demo.json as the last recording. S stops playback and Q quits.</desc>
+  <defs>
+    <linearGradient id="backdrop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#172554"/>
+      <stop offset="0.5" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#164e63"/>
+    </linearGradient>
+    <linearGradient id="border" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#475569"/>
+      <stop offset="1" stop-color="#1e293b"/>
+    </linearGradient>
+  </defs>
+  <rect width="1040" height="420" rx="24" fill="url(#backdrop)"/>
+  <rect x="24" y="24" width="992" height="372" rx="14" fill="#0b101b" stroke="url(#border)"/>
+  <path d="M38 24H1002A14 14 0 0 1 1016 38V68H24V38A14 14 0 0 1 38 24Z" fill="#192131"/>
+  <path d="M24 68H1016" stroke="#293448"/>
+  <circle cx="48" cy="46" r="6" fill="#ff6058"/>
+  <circle cx="68" cy="46" r="6" fill="#ffbd2e"/>
+  <circle cx="88" cy="46" r="6" fill="#28c840"/>
+  <text x="520" y="51" fill="#a4b1c6" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13">cursor-replay</text>
+  <g id="terminal-frame" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="20">
+    <text data-row="2" data-column="9" x="148" y="108" fill="#e2e8f0" font-weight="bold">Cursor Replay CLI</text>
+    <text data-row="4" data-column="9" x="148" y="160" fill="#22d3ee">Playing&#160;&#160;00:12 / 00:48</text>
+    <text data-row="5" data-column="9" x="148" y="186" fill="#d7e0ed">Sit back. Replaying your take.</text>
+    <text data-row="7" data-column="9" x="148" y="238" fill="#94a3b8">[&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;&#183;] 25%</text>
+    <text data-row="9" data-column="9" x="148" y="290" fill="#94a3b8">Last: demo.json</text>
+    <text data-row="11" data-column="9" x="148" y="342" fill="#f8fafc">[S] Stop playback&#160;&#160;&#160;&#160;&#160;&#160;&#160;[Q] Quit</text>
+  </g>
+</svg>

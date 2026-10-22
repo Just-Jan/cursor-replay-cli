@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable tag to release (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: macos-15
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      revision: ${{ steps.tag.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release tag and version
+        id: tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [ "$TAG" = HEAD ]; then
+            echo "::error::A release requires a stable vX.Y.Z tag, not HEAD."
+            exit 1
+          fi
+          ruby scripts/prepare-release.rb "$TAG" "$RUNNER_TEMP/release"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$TAG^{commit}")"
+          git merge-base --is-ancestor HEAD origin/main
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  checks:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.validate.outputs.revision }}
+
+  publish:
+    needs: [validate, checks]
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.revision }}
+          fetch-depth: 0
+      - name: Prepare release assets
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$TAG^{commit}")"
+          git show origin/main:Formula/cursor-replay.rb > "$RUNNER_TEMP/current-formula.rb"
+          ruby - "$TAG" "$RUNNER_TEMP/current-formula.rb" <<'RUBY'
+          require "rubygems"
+          incoming = Gem::Version.new(ARGV.fetch(0).delete_prefix("v"))
+          formula = File.read(ARGV.fetch(1))
+          current = formula[%r{/releases/download/v(\d+\.\d+\.\d+)/}, 1]
+          abort "Refusing to release an older version than the Homebrew formula." if current && incoming < Gem::Version.new(current)
+          RUBY
+          ruby scripts/prepare-release.rb "$TAG" "$RUNNER_TEMP/release"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          state=$(gh api "repos/$GH_REPO/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | .draft")
+          if [ "$state" = "false" ]; then
+            mkdir -p "$RUNNER_TEMP/published"
+            gh release download "$TAG" --pattern '*.tar.gz' --dir "$RUNNER_TEMP/published"
+            cmp "$RUNNER_TEMP"/release/*.tar.gz "$RUNNER_TEMP"/published/*.tar.gz
+          else
+            if [ -z "$state" ]; then
+              gh release create "$TAG" --verify-tag --draft --title "Cursor Replay CLI $TAG" --generate-notes
+            fi
+            gh release upload "$TAG" "$RUNNER_TEMP"/release/*.tar.gz "$RUNNER_TEMP/release/SHA256SUMS" "$RUNNER_TEMP/release/cursor-replay.rb" --clobber
+            gh release edit "$TAG" --draft=false --latest
+          fi
+      - name: Update this repository's Homebrew tap
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          git switch main
+          git pull --ff-only origin main
+          ruby - "$TAG" <<'RUBY'
+          require "rubygems"
+          incoming = Gem::Version.new(ARGV.fetch(0).delete_prefix("v"))
+          formula = File.read("Formula/cursor-replay.rb")
+          current = formula[%r{/releases/download/v(\d+\.\d+\.\d+)/}, 1]
+          abort "Refusing to downgrade the Homebrew formula." if current && incoming < Gem::Version.new(current)
+          RUBY
+          cp "$RUNNER_TEMP/release/cursor-replay.rb" Formula/cursor-replay.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/cursor-replay.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "Update Homebrew formula for $TAG" --trailer "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" --trailer "Copilot-Session: 6f39959a-c96f-47bf-8a70-b12ae862caf6"
+          git push origin HEAD:main

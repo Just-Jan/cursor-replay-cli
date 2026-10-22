@@ -1,7 +1,8 @@
 # Cursor Replay CLI developer guide
 
-This guide is for maintaining and extending the application. For installation,
-permission setup, and everyday controls, start with [README.md](README.md).
+This guide is for maintaining and extending the application. Start with the
+[overview](README.md); installation, permissions, and everyday controls are in
+the [usage guide](docs/USAGE.md).
 
 ## Project map
 
@@ -16,10 +17,11 @@ the product rename is not a core API or recording-format migration.
 | File | Responsibility |
 | --- | --- |
 | `Package.swift` | Core target, CLI and probe products, and core/CLI Swift Testing targets |
+| `README.md` / `docs/USAGE.md` | Product overview and detailed installation/usage guide |
 | `Sources/MouseRecorderCLI/MouseRecorderCLI.swift` | Argument parsing, command dispatch, signal handling, countdowns, file checks, and reports |
 | `Sources/MouseRecorderCLI/TerminalInterface.swift` | Terminal input settings, single-key menu, action controls, and last-file selection |
 | `Sources/MouseRecorderCLI/TerminalScreen.swift` | Compact alternate-screen rendering, presentation thread, capability fallbacks, and output restoration |
-| `Sources/MouseRecorderCLI/AppIdentity.swift` | Public display/command names and menu data-directory resolution |
+| `Sources/MouseRecorderCLI/AppIdentity.swift` | Public display/command names, release version, and menu data-directory resolution |
 | `Sources/MouseRecorderCore/Recording.swift` | Codable model, event reconstruction, display layout, validation, atomic JSON I/O, and legacy conversion |
 | `Sources/MouseRecorderCore/Recorder.swift` | Listen-only HID event tap, dedicated run loop, callback state, observations, and capture boundaries |
 | `Sources/MouseRecorderCore/Playback.swift` | Absolute scheduling, event submission, loops, held-input tracking, and cleanup |
@@ -35,7 +37,12 @@ the product rename is not a core API or recording-format migration.
 | `scripts/build.sh` | Release build with an external scratch cache; copies the CLI to `bin/cursor-replay` |
 | `scripts/install.sh` | Builds and installs `~/.local/bin/cursor-replay` without editing `PATH` |
 | `scripts/test.sh` | External-cache Swift Testing runner, including bundled macro-plugin workaround |
-| `.github/ci.example.yml` | Inactive GitHub Actions template for macOS 15 tests, release build, and help smoke check |
+| `Formula/cursor-replay.rb` | Homebrew tap formula; HEAD-only until the first stable release |
+| `scripts/prepare-release.rb` | Allowlisted, reproducible committed-source archive, checksum, and stable formula generator |
+| `scripts/test-release.rb` | Release archive, checksum, version/tag, and formula-update regression tests |
+| `scripts/test-homebrew.sh` | Temporary local tap installation/test with cleanup |
+| `.github/workflows/ci.yml` | macOS 15 Apple Silicon/Intel tests, release build, and Homebrew installation checks |
+| `.github/workflows/release.yml` | Stable-tag release publication and same-repository formula update |
 
 The core does not know about menu key letters or terminal rendering. The CLI
 uses the same core recorder/player for direct commands, menu actions, and
@@ -82,22 +89,24 @@ blocked by extension-based sync policies.
 
 ### Continuous integration
 
-Source tests and the release build have been validated locally.
-[`.github/ci.example.yml`](.github/ci.example.yml) is an **inactive template**,
-not an enabled workflow. It has not run on GitHub, and no active
-`.github/workflows/` configuration is included.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) handles pushes to `main`,
+pull requests, manual dispatch, and calls from the release workflow. Its
+`macos-15` (Apple Silicon) and `macos-15-intel` jobs use read-only repository
+contents permissions. Each runs release-tooling tests, Swift tests, a release
+build, help/version smoke checks, and a real source-based Homebrew install/test.
+The Homebrew test uses a temporary local tap and uninstalls it on exit; it
+refuses to replace an existing Homebrew installation of `cursor-replay`.
 
-If enabled later, the template handles pushes, pull requests, and manual
-dispatch on `macos-15`. It uses `contents: read` permissions and runs
-`scripts/test.sh`, `scripts/build.sh`, and `bin/cursor-replay --help`. This builds
-release configuration; it does not create or publish a GitHub release.
+The checks archive the checked-out commit, not the potentially dirty worktree.
+Homebrew receives that archive through a local `file://` URL with the same
+SHA-256 as the release formula. This exercises the formula without depending
+on an already published tag or release URL.
 
-To enable GitHub Actions later, move `.github/ci.example.yml` to
-`.github/workflows/ci.yml` and commit/push that intentional change using an
-appropriately authorized GitHub login or token. Do not describe the project as
-passing CI or add a passing status badge before an actual successful run is
-verified. These checks do not exercise permissions or physical replay.
-The optional private-file timeline harness is not enabled by the template.
+The workflows become active when committed and pushed with authorization to
+update workflow files. Do not describe the project as passing remote CI or add
+a passing status badge before a successful run is verified. No check requests
+Accessibility/Input Monitoring or posts system input. The optional private-file
+timeline harness is not enabled.
 
 ### Diagnostic probe
 
@@ -710,9 +719,10 @@ with [releases](https://github.com/Just-Jan/cursor-replay-cli/releases) under
 the same project. An [MIT license](LICENSE) is included. Complete final
 validation and the source-content audit before publishing.
 
-Follow the [allowlisted source archive command](README.md#share-source-safely).
+Follow the [allowlisted source archive command](docs/USAGE.md#share-source-safely),
+or use the committed-source release generator described below.
 It uses `COPYFILE_DISABLE=1`, explicitly includes `Package.swift`, `Sources`,
-`Tests`, `scripts`, `.github`, `README.md`, `DEVELOPMENT.md`, `LICENSE`, and
+`Tests`, `scripts`, `Formula`, `docs`, `.github`, `README.md`, `DEVELOPMENT.md`, `LICENSE`, and
 `.gitignore`, and excludes `.DS_Store` and `._*`. Inspect the allowlisted folders
 before sharing; `.gitignore` is not a sharing filter.
 
@@ -737,8 +747,77 @@ Before an external release:
    playback, color/dumb-terminal fallbacks, and controlled terminal restoration.
 4. Run authorized real-app checks separately from non-posting tests; document
    tested OS versions, architectures, input hardware, and unresolved failures.
-5. Decide on signing/notarization and distribution. Universal builds and an
-   installer package are not configured.
+5. Confirm source-based Homebrew distribution is appropriate. Developer ID
+   signing/notarization, bottles, universal binaries, and a desktop installer
+   are not configured; those require a separate distribution/signing policy.
 6. Inspect archive contents and links for private data before sharing.
 
 Never include signing credentials or private keys in a source archive.
+
+### Publishing a release
+
+This repository doubles as the Homebrew tap. No separate repository, PAT,
+Developer ID certificate, or notarization secret is needed for the source-built
+formula. The workflow uses GitHub's built-in `GITHUB_TOKEN`, with `contents: write`
+only in its publishing job. GitHub Actions must be enabled, permitted to use
+`actions/checkout`, and permitted to push the formula update to `main`.
+
+Before the first release, commit and push the packaging changes to `main`.
+Use an appropriately authorized login/token for `.github/workflows/` files.
+The initial version is `0.1.0`; for later releases, change
+`AppIdentity.version` in `Sources/MouseRecorderCLI/AppIdentity.swift`, commit,
+and push. Use stable, strictly increasing `X.Y.Z` versions without prerelease
+suffixes. Do not manually edit the generated stable URL or checksum.
+
+From the committed release source, preview the assets and install locally:
+
+```sh
+ruby scripts/test-release.rb
+./scripts/test.sh
+./scripts/build.sh
+ruby scripts/prepare-release.rb HEAD dist/preview
+sh scripts/test-homebrew.sh dist/preview/cursor-replay-cli-0.1.0.tar.gz dist/preview/cursor-replay.rb
+```
+
+Use the actual version in the archive filename for subsequent releases.
+The output directory must not already contain an archive for that version;
+choose a fresh directory for another preview. The generator uses `git archive`
+on an explicit path allowlist and `gzip -n`, excludes uncommitted files, and
+produces these files in `dist/preview`:
+
+| File | Purpose |
+| --- | --- |
+| `cursor-replay-cli-X.Y.Z.tar.gz` | Source used by Homebrew, including license and tests |
+| `SHA256SUMS` | Source archive SHA-256; check with `shasum -a 256 -c SHA256SUMS` in the output directory |
+| `cursor-replay.rb` | Stable formula pointing to that archive's future GitHub Release URL |
+
+The formula tracked on `main` starts HEAD-only. The preview's stable formula is
+not meant to be copied back until its source archive has actually been published.
+After reviewing the preview, create and push the tag:
+
+```sh
+git tag -a v0.1.0 -m "Cursor Replay CLI 0.1.0"
+git push origin v0.1.0
+```
+
+The [release workflow](.github/workflows/release.yml) requires the tag to match
+the embedded CLI version and belong to `main`'s history. It validates a pinned
+commit on both architectures, prepares the source archive and formula, uploads
+all three assets to a draft release, publishes it, then commits the formula to
+`main`. Publishing happens only after both Homebrew installation tests pass.
+Never move a published tag or replace its source archive: the installed formula
+pins its SHA-256.
+
+If a run fails, fix the underlying problem and rerun the workflow, or manually
+dispatch **Release** with the existing `vX.Y.Z` tag. Draft assets can be retried;
+already published source is compared byte-for-byte and never overwritten.
+The workflow refuses to downgrade the stable formula. If a failed source needs
+changes, make a new version/tag rather than moving the old one.
+
+If branch protection prevents the bot's final push, the release remains
+published but the tap is not updated. Download `cursor-replay.rb` from that
+release, place it in `Formula/cursor-replay.rb` through a normal reviewed PR,
+and merge it into `main`. No bypass or personal token is required. Consumers
+can then use the [Homebrew installation guide](docs/USAGE.md#install-with-homebrew).
+The GitHub-generated source links also exist, but the formula uses the explicit
+allowlisted release asset.

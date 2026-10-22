@@ -1,265 +1,107 @@
+<div align="center">
+
 # Cursor Replay CLI
 
-**Record a mouse session. Reset your workspace. Play it back.**
+**Record your mouse. Replay your workflow.**
 
-A native macOS command-line tool with a compact terminal interface and scriptable
-commands. No GUI, target-app launcher, or runtime dependency on `cliclick` or
-`osascript`.
+Repeat clicks, drags, and scrolling in your macOS apps.<br>
+A native terminal app. Local recordings. No cloud service.
 
-- Capture cursor movement, clicks, double clicks, button-held drags, and scrolling,
-  including trackpad deltas, scroll phases, and recorded momentum.
-- Retain every captured event, its coordinates, and full-session timing, including
-  leading and trailing pauses. No movement interpolation.
-- Keep captures local and private. Modifier flags accompany mouse events, but
-  general keyboard input is not recorded or replayed.
+[![macOS 15+](https://img.shields.io/badge/macOS-15%2B-111827?logo=apple&style=flat-square)](#where-it-works)
+[![Swift 6+](https://img.shields.io/badge/Swift-6%2B-F05138?logo=swift&logoColor=white&style=flat-square)](#install)
+[![MIT license](https://img.shields.io/badge/license-MIT-2563EB?style=flat-square)](LICENSE)
 
-Preserving events is not a promise of identical target-app behavior. macOS
-delivery latency, coalescing, app state, and display changes can affect replay.
-Use `verify` to measure the event stream, not to certify hardware equivalence.
+[Install](#install) · [Open the app](#open-the-app) · [Usage guide](docs/USAGE.md) · [Developer guide](DEVELOPMENT.md)
 
-[Source](https://github.com/Just-Jan/cursor-replay-cli) ·
-[Releases](https://github.com/Just-Jan/cursor-replay-cli/releases) ·
-[Developer guide](DEVELOPMENT.md) · [MIT license](LICENSE)
+![Playback preview showing elapsed time, progress, and keyboard controls](docs/assets/terminal-preview.svg)
 
-## Build and run
+<sub>Rendered from the app with an example take. Runs in your terminal, not a separate desktop window.</sub>
 
-Requires **macOS 15+**, **Swift 6+**, and Apple Command Line Tools or Xcode.
-There are no third-party package dependencies. Install Command Line Tools with
-`xcode-select --install` if needed.
+</div>
 
-From the unpacked `cursor-replay-cli` source folder:
+Repeat a product walkthrough, revisit a scrolling interaction, or reproduce a
+mouse-driven UI issue without performing every gesture again.
 
-```sh
-./scripts/build.sh
-./bin/cursor-replay --help
-./bin/cursor-replay doctor
-./bin/cursor-replay
+## From gestures to another take
+
+```mermaid
+flowchart LR
+    record["1. Record your actions"] --> save["2. Save locally"]
+    save --> reset["3. Reset your workspace"]
+    reset --> play["4. Replay the take"]
+    play -.->|"Try it again"| reset
 ```
 
-The build script uses a release build, keeps SwiftPM output in
-`~/Library/Caches/cursor-replay-cli/swiftpm`, and copies the executable to
-`./bin/cursor-replay`. Override the build cache with `CURSOR_REPLAY_BUILD_DIR`.
-The generated `bin/` folder is not source and is ignored by Git.
+Capture movement, clicks, drags, and mouse or trackpad scrolling with their
+recorded timing and pauses. Replay a take, change its speed, or loop it from the CLI.
+Recordings are local JSON files. No third-party runtime dependencies.
 
-Optional user-level installation:
+## Where it works
+
+| Environment | Scope |
+| --- | --- |
+| **System** | macOS 15+ in your logged-in desktop session. Not Windows or Linux. |
+| **Interface** | Terminal or a local integrated terminal. A CLI, not a desktop `.app`. |
+| **Target** | Mouse-driven interactions in macOS apps and browser windows, not one specific editor. |
+| **Not included** | Typing capture, video recording, UI-element recognition, or automatic app launching. |
+
+> [!IMPORTANT]
+> Replay sends **real mouse input at recorded screen coordinates**. Restore the
+> app state and display layout yourself, and start with a disposable document.
+> The same event stream does not guarantee identical app behavior.
+
+## Install
+
+Requires **Swift 6+** through Apple's Command Line Tools or Xcode 16+.
+If needed, install the tools with `xcode-select --install`.
+
+**Pre-release:** Homebrew packaging is prepared, but no release has been published.
+For now, install from source:
 
 ```sh
+git clone https://github.com/Just-Jan/cursor-replay-cli.git
+cd cursor-replay-cli
 ./scripts/install.sh
 export PATH="$HOME/.local/bin:$PATH"
-cursor-replay --help
-```
-
-The installer builds first, then installs `~/.local/bin/cursor-replay`. It does
-not change `PATH` or shell configuration. Add the export to your shell
-configuration yourself if needed, or invoke the installed executable by its
-full path. Reinstall after rebuilding and quit old running instances.
-To uninstall, remove `~/.local/bin/cursor-replay`; captures remain untouched.
-
-Use compiled executables, not `swift SomeFile.swift`. The current built binary
-is Apple Silicon **arm64 only**, not universal. Other architectures have not
-been independently validated; recipients should build on their own Macs.
-Keep source and build caches outside cloud sync, whose file policies can reject
-generated signing artifacts.
-
-## Grant permissions
-
-Run `cursor-replay doctor`, or `./bin/cursor-replay doctor` before installation.
-In **System Settings > Privacy & Security**, grant the missing permissions to
-the app hosting your terminal, such as Terminal or your integrated terminal's
-host:
-
-| Check | Setting |
-| --- | --- |
-| Accessibility | Privacy & Security > Accessibility |
-| Input Monitoring | Privacy & Security > Input Monitoring |
-| Post Event Access | Normally controlled through Accessibility |
-
-These are terminal-based grants, not a target-app selector. If macOS lists the
-executable itself, enable that entry as appropriate. Fully quit and reopen the
-terminal if grants are not recognized, then rerun `doctor` using the same
-executable path. On managed Macs, ask IT about locked settings.
-
-`doctor` checks permissions and displays; it does not post input or prove replay
-works. Grant these broad permissions only to code you trust.
-
-## One small terminal screen
-
-Run `cursor-replay` with no arguments, or `cursor-replay menu`. The interactive
-menu requires a real terminal. It uses one compact alternate-screen view with
-a subtle one-second recording pulse, elapsed time, playback progress, and one
-friendly current message, rather than a scrolling log wall.
-
-No Enter is needed. Uppercase and lowercase letters both work.
-
-| Key | Action |
-| --- | --- |
-| **R** | Record after a three-second countdown |
-| **S** | Stop and save recording, or stop playback |
-| **P** | Play the last saved recording after a three-second countdown |
-| **Q** or **Ctrl+C** | Quit, saving an active recording first |
-| **Esc** | Alternative stop during recording or playback |
-
-There are no numeric aliases or mouse-clickable buttons. **S needs terminal
-focus.** Esc is observed globally during an active operation and is listen-only,
-so the target app also receives it. S or Esc during countdown cancels without
-creating a recording. Q or Ctrl+C exits.
-
-1. Press **R** and switch to your target app during the countdown.
-2. Perform the mouse actions, then press **Esc**, or return here and press **S**.
-3. Wait for confirmation that the file was saved. Reset the target app's state.
-4. Press **P** and switch back during the countdown. Repeat with **P** or start
-   another recording with **R**.
-
-The tool never selects, launches, or restores a target app. Replay triggers real
-input at recorded screen coordinates. Begin with a disposable document or other
-non-destructive target.
-
-`NO_COLOR` disables color; `TERM=dumb` uses a simpler presentation. Terminal
-settings and cursor visibility are restored on controlled exit. Forced
-termination cannot guarantee restoration or held-input cleanup.
-
-## Captures stay outside the source tree
-
-New menu captures get unique filenames in:
-
-```text
-~/Library/Application Support/Cursor Replay CLI/recordings
-```
-
-`CURSOR_REPLAY_DATA_DIR` overrides the **base directory**, with `recordings/`
-appended. It must be a nonempty absolute path:
-
-```sh
-CURSOR_REPLAY_DATA_DIR="$HOME/CursorReplayData" cursor-replay
-```
-
-The menu selects the most recently modified recording across that folder and
-legacy `./recordings/`, `./recording.json`, and `./movement.json` locations.
-It excludes `.verification.json` reports. Discovery does not rewrite old files.
-
-Direct `record`, `play`, `info`, and `verify` commands retain **current working
-directory** semantics and default to `./recording.json`. `verify` writes
-`<name>.verification.json` beside its input. Existing output files require
-`--overwrite`. Empty captures can be saved with a warning but cannot be played.
-
-Format **3** is inspectable JSON with a Base64 native event snapshot. Captures
-can expose interaction patterns, screen locations, modifier states, and native
-metadata. Treat recordings and verification reports as private local data, not
-source files or public fixtures. Keep them outside the source folder.
-
-## Command-line reference
-
-Examples assume installation on `PATH`; otherwise use the full path to your
-built `bin/cursor-replay` executable.
-
-```text
-cursor-replay
-cursor-replay menu
-cursor-replay record [-o file.json] [--countdown 3] [--duration seconds] [--overwrite]
-cursor-replay play [file.json] [--countdown 3] [--speed 1.0] [--loop N]
-cursor-replay info [file.json]
-cursor-replay verify [file.json] [--countdown 3] [--overwrite]
 cursor-replay doctor
-cursor-replay --help
 ```
+
+This installs `~/.local/bin/cursor-replay`. For future terminals, add the
+`export PATH` line above to `~/.zshrc` (or your shell's configuration file).
+
+In **System Settings > Privacy & Security**, grant **Accessibility** and
+**Input Monitoring** to the app hosting your terminal. If macOS lists the
+executable itself, enable that entry as appropriate. Restart the terminal if
+needed and rerun `doctor`. [Permission details](docs/USAGE.md#grant-permissions).
+
+## Open the app
+
+From **any folder**, open Terminal and run:
 
 ```sh
-mkdir -p "$HOME/CursorReplaySessions"
-cd "$HOME/CursorReplaySessions"
-cursor-replay record -o demo.json --duration 30
-cursor-replay info demo.json
-cursor-replay play demo.json --countdown 5 --speed 0.5 --loop 3
-cursor-replay verify demo.json
+cursor-replay
 ```
 
-Use a private session folder like this for direct commands, not the source tree.
+Use a **hyphen**, not `cursor replay`. The interactive menu opens in that terminal;
+installation does not add an Applications or Spotlight icon.
 
-`--countdown` is a nonnegative whole number of seconds, default `3`.
-`--duration` is a positive recording limit after countdown. `--speed` is a
-positive multiplier, default exactly `1.0`; `0.5` is slower. `--loop` is a
-positive repetition count, default `1`. `-o` and `--output` select the recording
-output path.
+1. Press **R** and switch to your app during the three-second countdown.
+2. Perform your actions, then press **Esc** to stop and save.
+3. Wait for the save confirmation, then reset your app to its starting state.
+4. Press **P** in the terminal and switch back during the countdown.
 
-Direct commands do not have S-to-stop menu controls. Use Ctrl+C or Esc to stop
-and save a direct recording, or to stop direct playback.
-`info` reports event counts, event-span and full-session durations, displays,
-sampling intervals, and warnings. Older files may lack surrounding idle time;
-it cannot be recovered exactly. Playback reports planned versus elapsed time,
-with a minimum one-millisecond loop span for extremely short timelines.
+**S** also stops, but needs terminal focus. **Q** or **Ctrl+C** quits, saving an
+active recording first. Esc is listen-only: the target app receives it too.
 
-## Measure, do not assume, fidelity
+Menu recordings live in `~/Library/Application Support/Cursor Replay CLI/recordings`.
+Treat captures as private interaction data, not public fixtures.
 
-`cursor-replay verify demo.json` **posts real input** and captures it through
-the event tap. Reset the target app first and keep physical mouse/trackpad input
-idle after the countdown. Verification uses speed `1.0`, one pass, and unique
-event tags.
+## Beyond the menu
 
-It compares counts, missing/duplicate tags, order, positions, known click/scroll
-fields, all three axes of scroll deltas, and submission, event-timestamp, and
-callback-arrival timing. Reports include maximum, mean, and p95 errors.
+Use `record`, `play`, `info`, and `verify` in scripts. For example,
+`cursor-replay play demo.json --speed 0.5 --loop 3` replays a take at half speed
+three times. [Command reference](docs/USAGE.md#command-line-reference).
 
-Strict verification fails on payload/position differences, timing over 2 ms,
-capture interruptions, interfering input, or extra safety cleanup. Missing data
-is not a successful zero-error result. Raw OS flag differences remain visible
-even when public modifier-key flags match. A passing HID comparison still does
-not prove identical rendering, scrolling, or private native metadata.
-
-| Exit status | Meaning |
-| --- | --- |
-| `0` | Command succeeded, or strict verification passed |
-| `1` | Argument, permission, file, capture-health, or other operational error |
-| `2` | Verification failed or was inconclusive |
-| `130` | Playback/verification cancellation, or Ctrl+C/SIGTERM menu exit |
-
-A stopped direct recording normally returns `0` after saving successfully.
-See [historical evidence and limits](DEVELOPMENT.md#validation-evidence-and-known-limits).
-The new presentation and automated results are not a fresh physical
-trajectory, scroll, or click fidelity certification.
-
-## Troubleshooting
-
-| Symptom | Check |
-| --- | --- |
-| Permissions missing | Check both Accessibility and Input Monitoring for the terminal host, restart it, and rerun `doctor`. |
-| Replay shorter than expected | Compare event-span and session duration in `info`; make a new capture if an old file lacks boundaries. |
-| Initial cursor jump or display warning | Coordinates are absolute, not remapped or Retina-rescaled. Restore the original display layout or record again. |
-| No events to replay | Confirm movement happened after the countdown. |
-| File exists | Choose a new path or explicitly use `--overwrite`. |
-| Menu unavailable in a pipeline | Use an explicit command or `--help`. |
-| Terminal left in an unusual state after a forced kill | Run `stty sane`, then Enter. This restores conventional settings, not every prior customization. |
-| macOS blocks a downloaded binary | Build locally and follow software approval rules; do not disable system protections. |
-
-Controlled stops attempt matching mouse-up and zero-delta scroll/momentum
-endings. Crashes, SIGKILL, shutdown, or revoked permissions cannot guarantee
-cleanup delivery.
-
-## Share source safely
-
-Prefer sharing source so the recipient can build locally. From the source root,
-this explicit allowlist includes the license and documentation:
-
-```sh
-COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='._*' \
-  -czf cursor-replay-cli-source.tar.gz \
-  Package.swift Sources Tests scripts .github README.md DEVELOPMENT.md LICENSE .gitignore
-```
-
-Do not archive the entire working folder. Exclude compiled binaries, `bin/`,
-`.build/`, `.swiftpm/`, caches, Finder metadata, recordings, and verification
-reports. `.gitignore` does not filter a manually created archive.
-
-The project is [Just-Jan/cursor-replay-cli](https://github.com/Just-Jan/cursor-replay-cli)
-and is licensed under [MIT](LICENSE). Signing, notarization, universal binaries,
-and an installer package are not configured. Recipients still need their own
-permission grants.
-
-Source tests and the release build have been validated locally. An inactive
-[GitHub Actions template](.github/ci.example.yml) is included for macOS 15 tests,
-a release build, and a help smoke check with read-only repository contents
-permissions. It is **not enabled and has not run on GitHub**; no active workflow
-is included. To enable it later, move the template to
-`.github/workflows/ci.yml` using an appropriately authorized GitHub login or
-token. It does not publish releases.
-
-For architecture, tests, timing lessons, format compatibility, and release
-checks, continue with [DEVELOPMENT.md](DEVELOPMENT.md).
+[Homebrew after publication](docs/USAGE.md#install-with-homebrew) ·
+[Troubleshooting](docs/USAGE.md#troubleshooting) ·
+[Report an issue](https://github.com/Just-Jan/cursor-replay-cli/issues)

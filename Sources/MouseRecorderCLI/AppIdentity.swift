@@ -4,6 +4,7 @@ import MouseRecorderCore
 enum AppIdentity {
     static let displayName = "Cursor Replay CLI"
     static let command = "cursor-replay"
+    static let version = "0.1.0"
 
     static func recordingsDirectory(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> URL {
         if let override = environment["CURSOR_REPLAY_DATA_DIR"] {
