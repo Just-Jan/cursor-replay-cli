@@ -1,6 +1,8 @@
 class CursorReplay < Formula
   desc "Record and replay mouse sessions in a native macOS terminal interface"
   homepage "https://github.com/Just-Jan/cursor-replay-cli"
+  url "https://github.com/Just-Jan/cursor-replay-cli/releases/download/v0.1.0/cursor-replay-cli-0.1.0.tar.gz"
+  sha256 "48a411b869ca8a3eefcf6ffb62ec2a4c9b66ea46c6a1bf39051524ff55ad978c"
   license "MIT"
   head "https://github.com/Just-Jan/cursor-replay-cli.git", branch: "main"
 
