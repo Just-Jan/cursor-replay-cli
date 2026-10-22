@@ -27,7 +27,7 @@ struct TimelineHarnessTests {
         let span = last.targetNS - first.targetNS
         let difference = span >= original.durationNS ? span - original.durationNS : original.durationNS - span
         #expect(difference <= 1)
-        #expect(try #require(report.elapsedNS) >= report.plannedDurationNS)
+        #expect(try #require(report.elapsedNS) >= #require(report.plannedDurationNS))
         print("No CGEvent.post call was made. This checks the real scheduler, not HID delivery or target-app behavior.")
     }
 }

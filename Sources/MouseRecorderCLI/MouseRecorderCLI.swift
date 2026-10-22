@@ -18,6 +18,8 @@ Usage:
   cursor-replay --version
 
 Default file: recording.json. Default speed: exactly 1.0.
+Menu: Up/Down selects a saved recording; P plays it once; L loops it until stopped.
+Menu: Backspace/Delete asks to remove a take; Y deletes it, N or Escape keeps it.
 Menu: S stops and saves; Escape is an alternative. Both return to the menu.
 Menu: Q or Ctrl+C saves any active recording and exits.
 Menu recordings: ~/Library/Application Support/Cursor Replay CLI/recordings
@@ -38,7 +40,7 @@ struct Arguments {
     var path = "recording.json"
     var countdown = 3
     var speed = 1.0
-    var loops = 1
+    var loops: Int? = 1
     var duration: Double?
     var overwrite = false
 
@@ -211,14 +213,21 @@ struct MouseRecorderCLI {
             defer { _ = monitor.stop(header: header) }
             if let screen {
                 screen.update(TerminalViewState(
-                    phase: .playing, message: notices.isEmpty ? "Sit back. Replaying your take." : notices.joined(separator: " "),
+                    phase: args.loops == nil ? .looping : .playing,
+                    message: notices.isEmpty
+                        ? (args.loops == nil ? "Repeating your take. Press S or Esc to stop." : "Sit back. Replaying your take.")
+                        : notices.joined(separator: " "),
                     lastRecording: URL(fileURLWithPath: args.path).lastPathComponent,
                     startedAt: ProcessInfo.processInfo.systemUptime,
-                    duration: Double(recording.replayDurationNS) / 1_000_000_000 / args.speed * Double(args.loops),
+                    duration: args.loops.map { Double(recording.replayDurationNS) / 1_000_000_000 / args.speed * Double($0) },
                     eventCount: recording.events.count
                 ))
             } else {
-                print("Playing \(recording.events.count) events at speed \(args.speed), \(args.loops) loop(s).")
+                if let loops = args.loops {
+                    print("Playing \(recording.events.count) events at speed \(args.speed), \(loops) loop(s).")
+                } else {
+                    print("Looping \(recording.events.count) events at speed \(args.speed) until stopped.")
+                }
                 print("Stop playback with Ctrl+C or Escape.")
                 fflush(nil)
             }
@@ -478,8 +487,12 @@ struct MouseRecorderCLI {
 
     private static func printReplayDuration(_ report: PlaybackReport) {
         if let elapsed = report.elapsedNS {
-            print(String(format: "Replay duration: planned %.6f s; elapsed %.6f s.",
-                         Double(report.plannedDurationNS) / 1_000_000_000, Double(elapsed) / 1_000_000_000))
+            if let planned = report.plannedDurationNS {
+                print(String(format: "Replay duration: planned %.6f s; elapsed %.6f s.",
+                             Double(planned) / 1_000_000_000, Double(elapsed) / 1_000_000_000))
+            } else {
+                print(String(format: "Replay duration: elapsed %.6f s.", Double(elapsed) / 1_000_000_000))
+            }
         }
     }
 

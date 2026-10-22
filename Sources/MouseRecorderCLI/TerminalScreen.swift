@@ -3,7 +3,7 @@ import Foundation
 import Synchronization
 
 enum TerminalPhase: Sendable {
-    case ready, countdown, recording, playing, saving, error
+    case ready, countdown, recording, playing, looping, confirmingDeletion, saving, error
 }
 
 struct TerminalViewState: Sendable {
@@ -14,6 +14,8 @@ struct TerminalViewState: Sendable {
     var startedAt: TimeInterval? = nil
     var duration: TimeInterval? = nil
     var eventCount: Int? = nil
+    var recordings: [String] = []
+    var selectedRecordingIndex: Int? = nil
 }
 
 final class TerminalScreen: Sendable {
@@ -104,6 +106,15 @@ final class TerminalScreen: Sendable {
         }
     }
 
+    func updateRecordings(_ recordings: [String], selectedIndex: Int?) {
+        presentation.storage.withLock {
+            guard $0.lifecycle != .stopped, $0.finalMessage == nil else { return }
+            $0.view.recordings = recordings
+            $0.view.selectedRecordingIndex = selectedIndex
+            $0.view.lastRecording = selectedIndex.flatMap { recordings.indices.contains($0) ? recordings[$0] : nil }
+        }
+    }
+
     /// The first stop message wins. Waiting also joins a worker that failed asynchronously.
     func stop(finalMessage: String) {
         let shouldWait = presentation.storage.withLock { storage in
@@ -157,6 +168,7 @@ final class TerminalScreen: Sendable {
         var restoreAlternateScreen = false
         var singleLineWidth = 0
         var lastFrame: String?
+        var lastSize: (width: Int, height: Int)?
         var plainErrorWritten = false
         var tick = 0
 
@@ -189,6 +201,7 @@ final class TerminalScreen: Sendable {
                 let snapshot = presentation.storage.withLock { ($0.view, $0.finalMessage) }
                 if snapshot.1 != nil { break }
                 let size = terminalSize()
+                let resized = lastSize.map { $0.width != size.width || $0.height != size.height } ?? false
                 let now = ProcessInfo.processInfo.systemUptime
                 switch capabilities.mode {
                 case .ansi:
@@ -198,18 +211,21 @@ final class TerminalScreen: Sendable {
                         frame: tick / 2, now: now,
                         color: capabilities.color, unicode: capabilities.unicode
                     )
-                    if frame != lastFrame {
-                        try write(changedRows(previous: lastFrame, current: frame, height: size.height))
+                    if frame != lastFrame || resized {
+                        try write(changedRows(previous: lastFrame, current: frame, height: size.height, resized: resized))
                         lastFrame = frame
                     }
                 case .singleLine:
+                    let message = snapshot.0.phase == .ready
+                        ? (selectedRecording(snapshot.0)?.name ?? friendlyMessage(snapshot.0))
+                        : friendlyMessage(snapshot.0)
                     let line = clipped(
                         status(snapshot.0, now: now, frame: 0, unicode: false)
                             + "  " + controls(snapshot.0, width: size.width, compact: true)
-                            + "  " + friendlyMessage(snapshot.0),
+                            + "  " + message,
                         width: size.width, unicode: false, isError: snapshot.0.phase == .error
                     )
-                    if line != lastFrame {
+                    if line != lastFrame || resized {
                         let oldWidth = min(singleLineWidth, size.width)
                         let padding = String(repeating: " ", count: max(0, oldWidth - cellWidth(line)))
                         try write("\r" + line + padding + "\r")
@@ -233,6 +249,7 @@ final class TerminalScreen: Sendable {
                         plainErrorWritten = true
                     }
                 }
+                lastSize = size
                 if !startupSignalled {
                     presentation.started.leave()
                     startupSignalled = true
@@ -324,7 +341,7 @@ final class TerminalScreen: Sendable {
         let columns = valid && size.ws_col > 0 ? Int(size.ws_col) : 80
         let rows = valid && size.ws_row > 0 ? Int(size.ws_row) : 24
         // Leaving the final column unused avoids automatic wrapping and scrolling.
-        return (max(1, min(512, columns - 1)), max(1, min(256, rows)))
+        return (max(1, columns - 1), max(1, rows))
     }
 
     private enum Tone {
@@ -349,12 +366,13 @@ final class TerminalScreen: Sendable {
         var tone: Tone = .normal
     }
 
-    static func changedRows(previous: String?, current: String, height: Int) -> String {
+    static func changedRows(previous: String?, current: String, height: Int, resized: Bool = false) -> String {
         guard height > 0 else { return "" }
-        let old = previous?.components(separatedBy: "\n") ?? []
+        let old = resized ? [] : (previous?.components(separatedBy: "\n") ?? [])
         let new = current.components(separatedBy: "\n")
         let count = min(height, max(old.count, new.count))
-        var output = ""
+        // Terminal reflow invalidates every old row position after a resize.
+        var output = resized ? "\u{1B}[2J\u{1B}[H" : ""
         for index in 0..<count {
             let before = index < old.count ? old[index] : nil
             let after = index < new.count ? new[index] : ""
@@ -384,8 +402,8 @@ final class TerminalScreen: Sendable {
         let tone: Tone
         switch state.phase {
         case .ready: tone = .ready
-        case .recording: tone = .recording
-        case .playing: tone = .playing
+        case .recording, .confirmingDeletion: tone = .recording
+        case .playing, .looping: tone = .playing
         case .error: tone = .error
         default: tone = .normal
         }
@@ -435,7 +453,33 @@ final class TerminalScreen: Sendable {
                 }
             }
             if let fileRow, let recording = savedName(state) {
-                rows[fileRow] = Row(text: "Last: " + recording, tone: .muted)
+                rows[fileRow] = Row(text: (state.phase == .confirmingDeletion ? "Take: " : "Last: ") + recording, tone: .muted)
+            }
+            if (state.phase == .ready || state.phase == .error), let selected = selectedRecording(state) {
+                if let fileRow { rows[fileRow] = Row(text: "") }
+                if let progressRow {
+                    let arrows = unicode ? "↑/↓" : "Up/Down"
+                    let hint = state.recordings.count > 1 ? "\(arrows) Select recording" : "Recording"
+                    rows[progressRow] = Row(
+                        text: "\(hint)  \(selected.index + 1)/\(state.recordings.count)  Backspace/Del deletes", tone: .muted
+                    )
+                }
+                let listStart = max(messageStart + messageCount, progressRow.map { $0 + 1 } ?? footer - 3)
+                let visibleCount = min(2, footer - listStart, state.recordings.count)
+                if visibleCount > 0 {
+                    let first = min(max(0, selected.index - 1), state.recordings.count - visibleCount)
+                    for offset in 0..<visibleCount {
+                        let index = first + offset
+                        rows[listStart + offset] = Row(
+                            text: (index == selected.index ? "> " : "  ") + "\(index + 1). " + sanitized(state.recordings[index]),
+                            tone: index == selected.index ? .normal : .muted
+                        )
+                    }
+                } else if state.phase == .ready {
+                    rows[statusRow] = Row(
+                        text: "Ready  \(selected.index + 1)/\(state.recordings.count): \(selected.name)", tone: tone
+                    )
+                }
             }
             rows[footer] = Row(
                 text: controls(state, width: contentWidth, compact: height < 6),
@@ -503,6 +547,9 @@ final class TerminalScreen: Sendable {
     ) -> String {
         switch state.phase {
         case .ready:
+            if let selected = selectedRecording(state) {
+                return "Ready  \(selected.index + 1)/\(state.recordings.count)"
+            }
             return "Ready"
         case .countdown:
             if let count = state.countdown {
@@ -517,6 +564,10 @@ final class TerminalScreen: Sendable {
             let duration = finiteDuration(state)
             let position = min(elapsed(state, now: now), duration ?? .greatestFiniteMagnitude)
             return "Playing  " + timestamp(position) + (duration.map { " / " + timestamp($0) } ?? "")
+        case .looping:
+            return "Looping  " + timestamp(elapsed(state, now: now))
+        case .confirmingDeletion:
+            return "Let this take go?"
         case .saving:
             return "Saving..."
         case .error:
@@ -528,7 +579,15 @@ final class TerminalScreen: Sendable {
         _ state: TerminalViewState, now: TimeInterval, frame: Int, unicode: Bool
     ) -> String {
         let label = status(state, now: now, frame: frame, unicode: unicode)
+        if state.phase == .ready, let selected = selectedRecording(state) {
+            return label + " | " + selected.name
+        }
         return label + (state.phase == .error ? ": " : " | ") + friendlyMessage(state)
+    }
+
+    private static func selectedRecording(_ state: TerminalViewState) -> (index: Int, name: String)? {
+        guard let index = state.selectedRecordingIndex, state.recordings.indices.contains(index) else { return nil }
+        return (index, sanitized(state.recordings[index]))
     }
 
     private static func friendlyMessage(_ state: TerminalViewState) -> String {
@@ -553,26 +612,29 @@ final class TerminalScreen: Sendable {
         let keys: String
         switch state.phase {
         case .ready, .error:
-            action = savedName(state) == nil ? "[R] Record" : "[R] Record   [P] Play"
-            keys = savedName(state) == nil ? "R Q" : "R P Q"
+            action = savedName(state) == nil ? "[R] Record" : "[R] Record   [P] Play   [L] Loop"
+            keys = savedName(state) == nil ? "R Q" : "R P L Q"
         case .countdown:
             action = "[S] Cancel"
             keys = "S Q"
         case .recording:
             action = "[S] Stop + save"
             keys = "S Q"
-        case .playing:
+        case .playing, .looping:
             action = "[S] Stop playback"
             keys = "S Q"
+        case .confirmingDeletion:
+            action = "[Y] Delete   [N] Keep"
+            keys = "Y N Q"
         case .saving:
             action = ""
             keys = "Q"
         }
         if width < 20 { return keys }
-        if compact || width < 40 {
+        if compact || width < 44 {
             return keys.split(separator: " ").map { "[\($0)]" }.joined(separator: " ")
         }
-        return action.padding(toLength: 24, withPad: " ", startingAt: 0) + "[Q] Quit"
+        return action.padding(toLength: 36, withPad: " ", startingAt: 0) + "[Q] Quit"
     }
 
     private static func elapsed(_ state: TerminalViewState, now: TimeInterval) -> TimeInterval {

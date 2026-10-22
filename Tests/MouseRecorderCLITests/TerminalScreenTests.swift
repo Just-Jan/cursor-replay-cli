@@ -29,14 +29,112 @@ struct TerminalScreenTests {
         #expect(empty.contains("Ready when you are."))
         #expect(empty.contains("[R] Record"))
         #expect(!empty.contains("[P] Play"))
+        #expect(!empty.contains("[L] Loop"))
         #expect(empty.contains("[Q] Quit"))
         #expect(!empty.contains("Ctrl+C"))
 
         state.lastRecording = "/some/private/folder/session.json"
         let saved = render(state)
         #expect(saved.contains("[P] Play"))
+        #expect(saved.contains("[L] Loop"))
         #expect(saved.contains("Last: session.json"))
         #expect(!saved.contains("/some/private/folder"))
+    }
+
+    @Test func loopAndQuitShortcutsRemainVisibleAtCompactLayoutBoundaries() {
+        let state = TerminalViewState(lastRecording: "session.json")
+        for width in [8, 19, 20, 32, 39, 40, 43, 44, 48, 80] {
+            let frame = render(state, width: width)
+            #expect(frame.contains("L"))
+            #expect(frame.contains("Q"))
+            #expect(frame.components(separatedBy: "\n").allSatisfy { $0.count <= width })
+        }
+    }
+
+    @Test func recordingBrowserShowsSelectedTakeAndScrollsItsNeighbors() {
+        var state = TerminalViewState(
+            lastRecording: "three.json",
+            recordings: ["one.json", "two.json", "three.json", "four.json", "five.json"],
+            selectedRecordingIndex: 2
+        )
+        let frame = render(state)
+        #expect(frame.contains("Ready  3/5"))
+        #expect(frame.contains("↑/↓ Select recording  3/5"))
+        #expect(frame.contains("> 3. three.json"))
+        #expect(frame.contains("2. two.json"))
+        #expect(!frame.contains("4. four.json"))
+        #expect(!frame.contains("one.json"))
+        #expect(!frame.contains("five.json"))
+        #expect(render(state, unicode: false).contains("Up/Down Select recording"))
+
+        state.selectedRecordingIndex = 4
+        #expect(render(state).contains("> 5. five.json"))
+        #expect(!render(state).contains("two.json"))
+        state.phase = .looping
+        #expect(!render(state).contains("Select recording"))
+        #expect(!render(state).contains("> 5."))
+        #expect(render(state).contains("[S] Stop playback"))
+    }
+
+    @Test func recordingBrowserShowsAtMostTwoRecordingRowsForEverySelection() {
+        let names = ["one.json", "two.json", "three.json", "four.json", "five.json"]
+        for index in names.indices {
+            let state = TerminalViewState(
+                lastRecording: names[index], recordings: names, selectedRecordingIndex: index
+            )
+            let frame = render(state)
+            let recordingRows = frame.components(separatedBy: "\n").filter { $0.contains(".json") }
+            #expect(recordingRows.count == 2)
+            #expect(frame.contains("> \(index + 1). \(names[index])"))
+            #expect(frame.contains("Backspace/Del deletes"))
+        }
+    }
+
+    @Test func deletionConfirmationNamesTheTakeAndOffersExplicitDeleteOrKeep() {
+        let state = TerminalViewState(
+            phase: .confirmingDeletion,
+            message: "Delete \"session.json\" forever? N keeps it safe.",
+            lastRecording: "session.json"
+        )
+        let frame = render(state)
+        #expect(frame.contains("Let this take go?"))
+        #expect(frame.contains("session.json"))
+        #expect(frame.contains("forever"))
+        #expect(frame.contains("[Y] Delete"))
+        #expect(frame.contains("[N] Keep"))
+        #expect(!frame.contains("[P] Play"))
+        #expect(!frame.contains("[L] Loop"))
+        #expect(!frame.contains("Select recording"))
+        for width in [8, 19, 32, 80] {
+            for height in [2, 3, 6, 24] {
+                let compact = render(state, width: width, height: height)
+                let lines = compact.components(separatedBy: "\n")
+                #expect(lines.count <= height)
+                #expect(lines.allSatisfy { $0.count <= width })
+                #expect(lines.last?.contains("Y") == true)
+                #expect(lines.last?.contains("N") == true)
+                #expect(lines.last?.contains("Q") == true)
+            }
+        }
+    }
+
+    @Test func recordingBrowserFitsSmallViewportsWithoutMovingTheFooter() {
+        let state = TerminalViewState(
+            lastRecording: "second.json", recordings: ["first.json", "second.json", "third.json"],
+            selectedRecordingIndex: 1
+        )
+        for width in [1, 2, 8, 19, 32, 80] {
+            for height in [1, 2, 3, 4, 6, 8, 24] {
+                let frame = render(state, width: width, height: height, unicode: false)
+                let lines = frame.components(separatedBy: "\n")
+                #expect(lines.count <= height)
+                #expect(lines.allSatisfy { $0.count <= width })
+                if height >= 3, width >= 19 {
+                    #expect(lines.last?.contains("Q") == true)
+                }
+            }
+        }
+        #expect(render(state, height: 3).contains("2/3: second.json"))
     }
 
     @Test func recordingPulsesWithoutMovingTheStatusOrLosingElapsedTime() {
@@ -69,6 +167,19 @@ struct TerminalScreenTests {
         #expect(!render(state).contains(" / "))
         state.duration = 0
         #expect(!render(state).contains("%"))
+    }
+
+    @Test func loopingShowsElapsedTimeAndStopWithoutACompletionPercentage() {
+        let state = TerminalViewState(phase: .looping, startedAt: 100)
+        let frame = render(state)
+        #expect(frame.contains("Looping  00:12"))
+        #expect(frame.contains("[S] Stop playback"))
+        #expect(frame.contains("[Q] Quit"))
+        #expect(!frame.contains("%"))
+        #expect(!frame.contains(" / "))
+        #expect(!frame.contains("[P]"))
+        #expect(!frame.contains("[L]"))
+        #expect(render(state, now: 250).contains("Looping  02:30"))
     }
 
     @Test func errorsAreExplicitEvenWithAnEmptyMessageOrNoColor() {
@@ -188,7 +299,7 @@ struct TerminalScreenTests {
     }
 
     @Test func quitShortcutRemainsAvailableWithoutAnExtraHintSentence() {
-        for phase: TerminalPhase in [.ready, .countdown, .recording, .playing, .saving, .error] {
+        for phase: TerminalPhase in [.ready, .countdown, .recording, .playing, .looping, .confirmingDeletion, .saving, .error] {
             let state = TerminalViewState(phase: phase, lastRecording: "session.json")
             for width in [19, 32, 80] {
                 let output = render(state, width: width)
@@ -200,7 +311,7 @@ struct TerminalScreenTests {
     }
 
     @Test func shortcutRowsAreWhiteInEveryInteractivePhase() {
-        for phase: TerminalPhase in [.ready, .countdown, .recording, .playing, .saving, .error] {
+        for phase: TerminalPhase in [.ready, .countdown, .recording, .playing, .looping, .confirmingDeletion, .saving, .error] {
             let state = TerminalViewState(phase: phase, lastRecording: "session.json")
             let styled = render(state, color: true)
             let row = styled.components(separatedBy: "\n").first { $0.contains("[Q]") }
@@ -211,7 +322,7 @@ struct TerminalScreenTests {
     }
 
     @Test func shortcutFooterStaysOnTheSameRowAcrossStatesAndContentChanges() {
-        let phases: [TerminalPhase] = [.ready, .countdown, .recording, .playing, .saving, .error]
+        let phases: [TerminalPhase] = [.ready, .countdown, .recording, .playing, .looping, .confirmingDeletion, .saving, .error]
         for width in [8, 19, 32, 80] {
             for height in [3, 4, 6, 8, 9, 10, 24] {
                 var positions: [Int] = []
@@ -253,7 +364,7 @@ struct TerminalScreenTests {
 
     @Test func quitControlKeepsItsColumnAcrossPhases() {
         var columns: [Int] = []
-        for phase: TerminalPhase in [.ready, .countdown, .recording, .playing, .saving, .error] {
+        for phase: TerminalPhase in [.ready, .countdown, .recording, .playing, .looping, .confirmingDeletion, .saving, .error] {
             let state = TerminalViewState(phase: phase, lastRecording: "session.json")
             let line = render(state).components(separatedBy: "\n").last ?? ""
             if let range = line.range(of: "[Q]") {
@@ -285,5 +396,25 @@ struct TerminalScreenTests {
         let resized = TerminalScreen.changedRows(previous: "a\nb\nc", current: "x", height: 1)
         #expect(resized == "\u{1B}[1;1Hx\u{1B}[K")
         #expect(TerminalScreen.changedRows(previous: "a", current: "b", height: 0).isEmpty)
+    }
+
+    @Test func resizeInvalidatesUnchangedFramesAndRepaintsEveryVisibleRow() {
+        let state = TerminalViewState(lastRecording: "session.json")
+        let before = render(state, height: 24)
+        let after = render(state, height: 25)
+        #expect(before == after)
+        #expect(TerminalScreen.changedRows(previous: before, current: after, height: 25).isEmpty)
+        let resized = TerminalScreen.changedRows(previous: before, current: after, height: 25, resized: true)
+        #expect(resized.hasPrefix("\u{1B}[2J\u{1B}[H"))
+        #expect(resized.contains("Test title"))
+        #expect(resized.contains("session.json"))
+        #expect(resized.contains("[L] Loop"))
+        #expect(resized.contains("[Q] Quit"))
+
+        let small = render(state, width: 19, height: 3)
+        let shrink = TerminalScreen.changedRows(previous: after, current: small, height: 3, resized: true)
+        #expect(shrink.hasPrefix("\u{1B}[2J\u{1B}[H"))
+        #expect(!shrink.contains("\u{1B}[4;1H"))
+        #expect(TerminalScreen.changedRows(previous: small, current: after, height: 25, resized: true) == resized)
     }
 }

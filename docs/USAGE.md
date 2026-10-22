@@ -2,7 +2,8 @@
 
 [Overview](../README.md) · [Installation](#install-with-homebrew) ·
 [Permissions](#grant-permissions) · [Menu](#one-small-terminal-screen) ·
-[Commands](#command-line-reference) · [Troubleshooting](#troubleshooting)
+[Commands](#command-line-reference) · [Troubleshooting](#troubleshooting) ·
+[Release notes](RELEASES.md)
 
 ## How it works
 
@@ -150,7 +151,10 @@ No Enter is needed. Uppercase and lowercase letters both work.
 | --- | --- |
 | **R** | Record after a three-second countdown |
 | **S** | Stop and save recording, or stop playback |
-| **P** | Play the last saved recording after a three-second countdown |
+| **Up / Down** | Select a saved recording while idle |
+| **Backspace / Delete** | Ask to delete the selected recording; Y confirms, N or Esc cancels |
+| **P** | Play the selected recording once after a three-second countdown |
+| **L** | Loop the selected recording until stopped, after one three-second countdown |
 | **Q** or **Ctrl+C** | Quit, saving an active recording first |
 | **Esc** | Alternative stop during recording or playback |
 
@@ -165,11 +169,28 @@ creating a recording. Q or Ctrl+C exits.
 4. Press **P** and switch back during the countdown. Repeat with **P** or start
    another recording with **R**.
 
+Saved recordings appear newest first, with **>** marking the selected take.
+Two recordings are visible at a time. Use the **Up/Down arrows** to browse;
+the visible list follows the selection.
+The newest take is selected on launch and after saving a new recording.
+
+Press **Backspace** or **Delete** while idle to open **"Let this take go?"**
+for the selected file. **Y** permanently deletes just that recording; **N** or
+**Esc** keeps it. Other takes and verification reports are untouched. Recording,
+playback, and selection changes are disabled until you answer or quit.
+
+Press **L** to repeat the selected recording continuously instead. The screen shows
+**Looping** and elapsed time, with no completion percentage. The countdown runs
+only before the first pass; each pass preserves the recording's timing and pauses.
+Press **S** in the terminal or **Esc** globally to stop and return to the menu.
+The target app's state is not reset between passes.
+
 The tool never selects, launches, or restores a target app. Replay triggers real
 input at recorded screen coordinates. Begin with a disposable document or other
 non-destructive target.
 
 `NO_COLOR` disables color; `TERM=dumb` uses a simpler presentation. Terminal
+resizing redraws the view without stopping recording or playback. Terminal
 settings and cursor visibility are restored on controlled exit. Forced
 termination cannot guarantee restoration or held-input cleanup.
 
@@ -188,9 +209,10 @@ appended. It must be a nonempty absolute path:
 CURSOR_REPLAY_DATA_DIR="$HOME/CursorReplayData" cursor-replay
 ```
 
-The menu selects the most recently modified recording across that folder and
+The menu lists recordings across that folder and
 legacy `./recordings/`, `./recording.json`, and `./movement.json` locations.
-It excludes `.verification.json` reports. Discovery does not rewrite old files.
+It initially selects the most recently modified recording and excludes
+`.verification.json` reports. Discovery does not rewrite old files.
 
 Direct `record`, `play`, `info`, and `verify` commands retain **current working
 directory** semantics and default to `./recording.json`. `verify` writes

@@ -5,9 +5,10 @@ import Synchronization
 
 public struct PlaybackOptions: Sendable {
     public var speed: Double
-    public var loops: Int
+    /// A nil count repeats until cancelled, without retaining per-event timing samples.
+    public var loops: Int?
     public var tagBase: Int64?
-    public init(speed: Double = 1, loops: Int = 1, tagBase: Int64? = nil) {
+    public init(speed: Double = 1, loops: Int? = 1, tagBase: Int64? = nil) {
         self.speed = speed
         self.loops = loops
         self.tagBase = tagBase
@@ -27,7 +28,7 @@ public struct PlaybackReport: Sendable {
     public var cleanupEvents = 0
     public var samples: [PostSample] = []
     public var stopReason: String?
-    public var plannedDurationNS: UInt64 = 0
+    public var plannedDurationNS: UInt64?
     public var startedNS: UInt64?
     public var endedNS: UInt64?
 
@@ -72,7 +73,9 @@ public enum Playback {
     ) throws -> PlaybackReport {
         try recording.validate()
         guard !recording.events.isEmpty else { throw MouseRecorderError("The recording contains no events to replay.") }
-        guard options.loops > 0 else { throw MouseRecorderError("Loop count must be greater than zero.") }
+        if let loops = options.loops, loops <= 0 {
+            throw MouseRecorderError("Loop count must be greater than zero.")
+        }
         _ = try MachClock.scaledOffset(recording.replayDurationNS, speed: options.speed)
         let result = Mutex<Result<PlaybackReport, any Error>?>(nil)
         let finished = DispatchSemaphore(value: 0)
@@ -114,7 +117,8 @@ public enum Playback {
             try MachClock.scaledOffset(recording.leadingIdleNS + $0.timeNS, speed: options.speed)
         }
         let spanNS = max(try MachClock.scaledOffset(recording.replayDurationNS, speed: options.speed), 1_000_000)
-        let totalNS = spanNS.multipliedReportingOverflow(by: UInt64(options.loops))
+        // Unbounded playback checks its first loop here and each subsequent deadline below.
+        let totalNS = spanNS.multipliedReportingOverflow(by: UInt64(options.loops ?? 1))
         let paddedNow = clock.nowNS.addingReportingOverflow(21_000_000)
         guard !totalNS.overflow, !paddedNow.overflow,
               !paddedNow.partialValue.addingReportingOverflow(totalNS.partialValue).overflow else {
@@ -127,13 +131,23 @@ public enum Playback {
             throw MouseRecorderError("Playback deadline exceeds the absolute clock range.")
         }
         var report = PlaybackReport()
-        report.plannedDurationNS = totalNS.partialValue
-        report.startedNS = clock.nanoseconds(at: start.partialValue)
+        report.plannedDurationNS = options.loops == nil ? nil : totalNS.partialValue
+        let startedNS = clock.nanoseconds(at: start.partialValue)
+        report.startedNS = startedNS
         var held = HeldInput()
         var failure: (any Error)?
+        var loopOffset: UInt64 = 0
         do {
-            loop: for iteration in 0..<options.loops {
-                let loopOffset = UInt64(iteration) * spanNS
+            loop: while !cancellation.isCancelled {
+                if let loops = options.loops, report.completedLoops >= loops { break }
+                let nextOffset = loopOffset.addingReportingOverflow(spanNS)
+                guard !nextOffset.overflow, nextOffset.partialValue <= UInt64.max - startedNS else {
+                    throw MouseRecorderError("Total playback duration exceeds the nanosecond clock range.")
+                }
+                let end = start.partialValue.addingReportingOverflow(try clock.ticks(forNS: nextOffset.partialValue))
+                guard !end.overflow, end.partialValue <= clock.maximumTick else {
+                    throw MouseRecorderError("Playback deadline exceeds the absolute clock range.")
+                }
                 for (index, event) in events.enumerated() {
                     let target = start.partialValue + (try clock.ticks(forNS: loopOffset + offsets[index]))
                     guard try clock.wait(until: target, cancellation: cancellation),
@@ -149,14 +163,16 @@ public enum Playback {
                     let returned = clock.nowNS
                     held.observe(recording.events[index])
                     report.postedEvents += 1
-                    report.samples.append(PostSample(
-                        index: index, targetNS: clock.nanoseconds(at: target), postedNS: posted, returnedNS: returned
-                    ))
+                    if options.loops != nil {
+                        report.samples.append(PostSample(
+                            index: index, targetNS: clock.nanoseconds(at: target), postedNS: posted, returnedNS: returned
+                        ))
+                    }
                 }
-                let end = start.partialValue + (try clock.ticks(forNS: loopOffset + spanNS))
-                guard try clock.wait(until: end, cancellation: cancellation) else { break loop }
+                guard try clock.wait(until: end.partialValue, cancellation: cancellation) else { break loop }
                 report.cleanupEvents += try cleanup(&held, source: source, clock: clock, post: post)
                 report.completedLoops += 1
+                loopOffset = nextOffset.partialValue
             }
         } catch {
             failure = error

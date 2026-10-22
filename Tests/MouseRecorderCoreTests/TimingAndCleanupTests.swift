@@ -127,22 +127,26 @@ struct CleanupTests {
 }
 
 struct PlaybackTests {
-    @Test func cancellationBeforePlaybackPostsNothing() throws {
+    @Test(arguments: [false, true])
+    func cancellationBeforePlaybackPostsNothing(looping: Bool) throws {
         let cancellation = Cancellation()
         cancellation.cancel("test cancellation")
-        let report = try Playback.run(recording([sample()]), options: PlaybackOptions(), cancellation: cancellation)
+        let report = try Playback.run(
+            recording([sample()]), options: PlaybackOptions(loops: looping ? nil : 1), cancellation: cancellation
+        )
         #expect(report.postedEvents == 0)
         #expect(report.cleanupEvents == 0)
         #expect(report.completedLoops == 0)
         #expect(report.stopReason == "test cancellation")
     }
 
-    @Test func overflowingTimelineFailsBeforeAnyPost() throws {
+    @Test(arguments: [false, true])
+    func overflowingTimelineFailsBeforeAnyPost(looping: Bool) throws {
         let long = recording(try [sample(), sample(at: 1)])
         var original = long
         original.events[1].timeNS = UInt64.max
         #expect(throws: (any Error).self) {
-            try Playback.run(original, options: PlaybackOptions(), cancellation: Cancellation())
+            try Playback.run(original, options: PlaybackOptions(loops: looping ? nil : 1), cancellation: Cancellation())
         }
     }
 
@@ -164,7 +168,60 @@ struct PlaybackTests {
         #expect(try #require(report.elapsedNS) >= 60_000_000)
     }
 
-    @Test func cancellationBeforeSessionEndStillReleasesHeldButtonWithoutPosting() throws {
+    @Test func unboundedPlaybackRepeatsUntilStoppedWithoutRetainingSamples() throws {
+        let original = recording([try sample()])
+        let cancellation = Cancellation()
+        let count = Mutex(0)
+        let report = try Playback.run(
+            original, options: PlaybackOptions(loops: nil), cancellation: cancellation,
+            post: { _ in
+                let posted = count.withLock { $0 += 1; return $0 }
+                if posted == 100 { cancellation.cancel("Stop playback") }
+            }
+        )
+        #expect(report.postedEvents == 100)
+        #expect(report.completedLoops == 99)
+        #expect(report.samples.isEmpty)
+        #expect(report.plannedDurationNS == nil)
+        #expect(report.stopReason == "Stop playback")
+        #expect(try #require(report.elapsedNS) >= 99_000_000)
+    }
+
+    @Test func unboundedPlaybackReleasesHeldButtonsBetweenLoopsAndOnStop() throws {
+        let original = recording([try sample(.leftMouseDown)])
+        let cancellation = Cancellation()
+        let observed = Mutex<[UInt32]>([])
+        let report = try Playback.run(
+            original, options: PlaybackOptions(loops: nil), cancellation: cancellation,
+            post: { event in
+                let count = observed.withLock { $0.append(event.type.rawValue); return $0.count }
+                if count == 5 { cancellation.cancel("Stop playback") }
+            }
+        )
+        #expect(observed.withLock { $0 } == [
+            CGEventType.leftMouseDown.rawValue, CGEventType.leftMouseUp.rawValue,
+            CGEventType.leftMouseDown.rawValue, CGEventType.leftMouseUp.rawValue,
+            CGEventType.leftMouseDown.rawValue, CGEventType.leftMouseUp.rawValue
+        ])
+        #expect(report.postedEvents == 3)
+        #expect(report.completedLoops == 2)
+        #expect(report.cleanupEvents == 3)
+        #expect(report.stopReason == "Stop playback")
+    }
+
+    @Test func unboundedPlaybackRejectsVerificationTagsBeforePosting() throws {
+        let count = Mutex(0)
+        #expect(throws: (any Error).self) {
+            try Playback.run(
+                recording([sample()]), options: PlaybackOptions(loops: nil, tagBase: 100),
+                cancellation: Cancellation(), post: { _ in count.withLock { $0 += 1 } }
+            )
+        }
+        #expect(count.withLock { $0 } == 0)
+    }
+
+    @Test(arguments: [false, true])
+    func cancellationBeforeSessionEndStillReleasesHeldButtonWithoutPosting(looping: Bool) throws {
         var original = recording([try sample(.leftMouseDown)])
         original.header.timestampOriginNS = 1_000_000_000
         original.header.captureStartedNS = 1_000_000_000
@@ -172,7 +229,7 @@ struct PlaybackTests {
         let cancellation = Cancellation()
         let observed = Mutex<[UInt32]>([])
         let report = try Playback.run(
-            original, options: PlaybackOptions(), cancellation: cancellation,
+            original, options: PlaybackOptions(loops: looping ? nil : 1), cancellation: cancellation,
             post: { event in
                 observed.withLock { $0.append(event.type.rawValue) }
                 if event.type == .leftMouseDown { cancellation.cancel("test stop") }

@@ -11,7 +11,7 @@ A native terminal app. Local recordings. No cloud service.
 [![Swift 6+](https://img.shields.io/badge/Swift-6%2B-F05138?logo=swift&logoColor=white&style=flat-square)](#install)
 [![MIT license](https://img.shields.io/badge/license-MIT-2563EB?style=flat-square)](LICENSE)
 
-[Install](#install) · [Open the app](#open-the-app) · [Usage guide](docs/USAGE.md) · [Developer guide](DEVELOPMENT.md)
+[Install](#install) · [Open the app](#open-the-app) · [Usage guide](docs/USAGE.md) · [Release notes](docs/RELEASES.md) · [Developer guide](DEVELOPMENT.md)
 
 ![Playback preview showing elapsed time, progress, and keyboard controls](docs/assets/terminal-preview.svg)
 
@@ -33,7 +33,7 @@ flowchart LR
 ```
 
 Capture movement, clicks, drags, and mouse or trackpad scrolling with their
-recorded timing and pauses. Replay a take, change its speed, or loop it from the CLI.
+recorded timing and pauses. Replay a take, change its speed, or loop it until stopped.
 Recordings are local JSON files. No third-party runtime dependencies.
 
 ## Where it works
@@ -86,6 +86,12 @@ installation does not add an Applications or Spotlight icon.
 2. Perform your actions, then press **Esc** to stop and save.
 3. Wait for the save confirmation, then reset your app to its starting state.
 4. Press **P** in the terminal and switch back during the countdown.
+
+Use **Up/Down arrows** to browse saved recordings; the selected take is marked **>**.
+The list shows two takes at a time. **Backspace/Delete** asks before removing
+the selected take: **Y** deletes it permanently; **N** or **Esc** keeps it.
+Press **P** to play it once, or **L** to loop it until **S** or **Esc**.
+The countdown runs only once; the target app is not reset between repetitions.
 
 **S** also stops, but needs terminal focus. **Q** or **Ctrl+C** quits, saving an
 active recording first. Esc is listen-only: the target app receives it too.

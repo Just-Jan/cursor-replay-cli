@@ -19,7 +19,7 @@ the product rename is not a core API or recording-format migration.
 | `Package.swift` | Core target, CLI and probe products, and core/CLI Swift Testing targets |
 | `README.md` / `docs/USAGE.md` | Product overview and detailed installation/usage guide |
 | `Sources/MouseRecorderCLI/MouseRecorderCLI.swift` | Argument parsing, command dispatch, signal handling, countdowns, file checks, and reports |
-| `Sources/MouseRecorderCLI/TerminalInterface.swift` | Terminal input settings, single-key menu, action controls, and last-file selection |
+| `Sources/MouseRecorderCLI/TerminalInterface.swift` | Terminal input settings, escape-sequence decoding, recording browser, and action controls |
 | `Sources/MouseRecorderCLI/TerminalScreen.swift` | Compact alternate-screen rendering, presentation thread, capability fallbacks, and output restoration |
 | `Sources/MouseRecorderCLI/AppIdentity.swift` | Public display/command names, release version, and menu data-directory resolution |
 | `Sources/MouseRecorderCore/Recording.swift` | Codable model, event reconstruction, display layout, validation, atomic JSON I/O, and legacy conversion |
@@ -33,6 +33,7 @@ the product rename is not a core API or recording-format migration.
 | `Tests/MouseRecorderCoreTests/VerificationTests.swift` | Matching, missing/reordered data, flags, errors, and failure conditions |
 | `Tests/MouseRecorderCoreTests/TimelineHarnessTests.swift` | Optional real-file scheduler check with system posting disabled |
 | `Tests/MouseRecorderCLITests/TerminalScreenTests.swift` | Rendering, progress, clipping, terminal-text sanitization, error visibility, and color policy |
+| `Tests/MouseRecorderCLITests/TerminalInterfaceTests.swift` | Arrow-key decoding, recording discovery/order, navigation boundaries, and selection retention |
 | `Tests/MouseRecorderCLITests/AppIdentityTests.swift` | Default storage identity and data-directory override validation |
 | `scripts/build.sh` | Release build with an external scratch cache; copies the CLI to `bin/cursor-replay` |
 | `scripts/install.sh` | Builds and installs `~/.local/bin/cursor-replay` without editing `PATH` |
@@ -164,8 +165,19 @@ restoring terminal settings.
 The menu has a single compact alternate-screen view, with a subtly pulsing
 recording dot, elapsed time, bounded playback progress, and one friendly current
 message. A new state replaces the old message; do not add a scrolling event or
-notification log. R/S/P/Q accept either case, with Ctrl+C to quit and Esc as an
+notification log. R/S/P/L/Q accept either case, with Ctrl+C to quit and Esc as an
 alternative stop. There are no numeric aliases.
+
+Up/Down selects from a newest-first, two-row recording list, preserving the chosen
+file after playback. A new saved recording becomes selected. Backspace/Delete
+opens a dedicated confirmation state; only Y removes the selected file, using
+nonrecursive unlink. N/Esc cancels, Q exits, and other action/navigation keys are
+ignored until the dialog closes. Deletion refreshes the list and selects the
+nearest remaining take. Terminal escape
+sequences are decoded before dispatch, so arrow/function keys cannot leak S/Q
+shortcut bytes. P plays once; L repeats the selected recording until stopped,
+with one initial countdown. Loop mode shows elapsed time without a completion
+percentage.
 
 The title is injected into `TerminalScreen` by its caller, not hardcoded by the
 renderer. The recording indicator repeats a one-second Unicode `·/•/●/•`
@@ -186,6 +198,8 @@ in phase, message length, or file availability cannot move the shortcut footer.
 The quit control also keeps a fixed column on full-width layouts.
 Animation writes only rows whose contents changed. Do not clear and repaint the
 whole terminal on each tick or rewrite the static shortcut footer for a dot pulse.
+On terminal-size changes, invalidate the old frame, clear the reflowed screen,
+and repaint all visible rows even if the rendered text is unchanged.
 Terminal caret visibility is separate from the macOS mouse pointer. The renderer
 must not post extra mouse events, warp the pointer, or change global hide counts
 merely to change mouse-pointer visibility.
@@ -213,10 +227,10 @@ textual countdown behavior.
 append `recordings/` to it. Do not reinterpret the override as an output filename
 or as the recordings directory itself.
 
-The menu considers both this folder and legacy current-directory `recordings/`,
-`recording.json`, and `movement.json`, choosing the most recently modified
-recording and excluding `.verification.json`. Direct file-based commands retain
-current-working-directory semantics and the `recording.json` default. Neither
+The menu lists both this folder and legacy current-directory `recordings/`,
+`recording.json`, and `movement.json` newest first, initially selecting the most
+recently modified recording and excluding `.verification.json`. Direct file-based
+commands retain current-working-directory semantics and the `recording.json` default. Neither
 the executable location nor the menu data override changes direct file paths.
 
 Discovery is not migration. Before relocating private captures, preserve their
@@ -338,6 +352,12 @@ Late events are still submitted at their original absolute targets as soon as
 possible; none are skipped or interpolated. Each loop includes its trailing
 idle wait. The minimum loop span is one millisecond for zero/sub-millisecond
 timelines. Duration and deadline arithmetic is checked for overflow.
+
+`PlaybackOptions.loops == nil` repeats until cancellation. Each loop's deadline
+is range-checked before that loop posts any input. Unbounded playback has no
+planned total duration and retains no per-event timing samples, keeping memory
+bounded by the recording rather than the number of repetitions. Finite playback
+and single-pass verification retain their detailed timing samples.
 
 Actual submission time, not the ideal target, is written into the posted event's
 timestamp. Stamping the ideal deadline would make timestamp comparisons look
@@ -530,7 +550,7 @@ additional checks if verification is reused behind another interface.
 ./scripts/test.sh
 ./scripts/test.sh --filter RecordingTests
 ./scripts/test.sh --filter PlaybackTests
-./scripts/test.sh --filter 'TerminalScreenTests|AppIdentityTests'
+./scripts/test.sh --filter 'TerminalInterfaceTests|TerminalScreenTests|AppIdentityTests'
 ```
 
 The script disables XCTest and uses the installed Swift Testing framework. On
@@ -575,25 +595,50 @@ scroll, or target-app fidelity for the new presentation.
 
 ### Current automated checkpoint
 
-An integration test invocation during the product update on 2026-10-20 passed
-**47 test functions**, including an explicitly enabled non-posting timeline
-harness:
+The local v0.2.0 release check on 2026-10-22 passed **70 enabled Swift test
+functions**. The optional real-file, non-posting timeline harness was skipped
+because no timeline file was supplied:
 
 | Suite | Functions |
 | --- | ---: |
 | RecordingTests | 14 |
 | TimingTests | 5 |
 | CleanupTests | 4 |
-| PlaybackTests | 4 |
+| PlaybackTests | 7 |
 | VerificationTests | 7 |
-| TimelineHarnessTests, explicitly enabled | 1 |
-| TerminalScreenTests | 10 |
+| TimelineHarnessTests, skipped by default | 1 |
+| TerminalScreenTests | 25 |
+| TerminalInterfaceTests | 6 |
 | AppIdentityTests | 2 |
 
-This is 35 core functions plus 12 CLI functions. Source tests and the release
-build have been validated locally, not through GitHub Actions. Automated results
-do not certify physical trajectory, scroll, click, or target-app fidelity.
-Keep real-app checks separate from local build/test evidence.
+This is 38 core functions, including the skipped harness, plus 33 CLI functions.
+The three parameterized playback functions also exercise both finite and
+unbounded playback. Release-tooling checks passed **5 tests / 56 assertions**,
+and the optimized executable reported `cursor-replay 0.2.0`.
+
+Synthetic pseudo-terminal checks during this update exercised:
+
+- CSI/application-mode and fragmented arrow keys, discovery across current and
+  legacy folders, two-row browsing, and selection retention.
+- P/L/S/Q behavior, a single initial loop countdown, and terminal restoration.
+- Height-only resizing and repeated shrink/expand transitions down to 1x1,
+  both while idle and during countdown/loop playback.
+- Backspace/Delete confirmation, Y-only deletion, N/Esc/quit cancellation,
+  nearest-take selection, final-file deletion, and preservation of other files
+  and verification reports. A recording path replaced by a directory failed
+  explicitly rather than being recursively removed.
+
+These terminal harnesses used disposable synthetic fixtures. Playback events
+were delayed beyond the checks and no mouse input was posted. The harnesses
+are development observations, not a permanent end-to-end suite included in
+`scripts/test.sh`; decoder, library, rendering, and scheduler regressions are
+covered by the committed Swift suites.
+
+The release workflow separately requires tests, release builds, and source-built
+Homebrew installation checks on macOS 15 Apple Silicon and Intel before
+publication. See [Actions](https://github.com/Just-Jan/cursor-replay-cli/actions)
+for actual run outcomes. Automated results do not certify physical trajectory,
+scroll, click, or target-app fidelity. Keep real-app checks separate.
 
 ### Historical observations
 
@@ -686,7 +731,7 @@ Keep these invariants:
 - No default-speed floating-point round trip or relative-delay scheduling.
 - No silent fallback for invalid data, failed saves, or failed cleanup.
 - No dropping capture-health warnings or weakening verification to get a pass.
-- No numeric menu aliases; use R/S/P/Q, Ctrl+C quit, and Esc alternative stop.
+- No numeric menu aliases; use Up/Down to select, R/S/P/L/Q, Ctrl+C quit, and Esc alternative stop.
 - No success notification before the corresponding operation actually succeeded.
 - No terminal rendering or UI I/O on capture callbacks or playback scheduling
   threads.
@@ -710,6 +755,18 @@ the executable/build, OS/display setup, speed, number of **runs**, and whether
 the evidence is real-app observation, a HID check, a harness, or source review.
 Report errors over 2 ms and every position difference rather than rounding them
 away or describing the entire app as faithful.
+
+For menu changes, also check these non-fidelity behaviors:
+
+1. Make two distinct disposable takes, browse with Up/Down, and confirm P and L
+   use the selected take. Only two recording rows should be visible.
+2. Stop looping with S and Esc, then confirm the selection is retained.
+3. Resize while idle, during countdown, and during playback, including a
+   height-only resize and shrinking then restoring the window. Controls and
+   terminal restoration must still work.
+4. Press Backspace/Delete and confirm the named file is unchanged before Y.
+   N/Esc and quitting must preserve it. Y must remove only that recording,
+   retain verification reports, and handle deleting the final take.
 
 ## Packaging and release checklist
 
@@ -764,9 +821,10 @@ only in its publishing job. GitHub Actions must be enabled, permitted to use
 
 Before tagging a release, commit and push its source changes to `main`.
 Use an appropriately authorized login/token for `.github/workflows/` files.
-The initial version is `0.1.0`; for later releases, change
-`AppIdentity.version` in `Sources/MouseRecorderCLI/AppIdentity.swift`, commit,
-and push. Use stable, strictly increasing `X.Y.Z` versions without prerelease
+For each release, change `AppIdentity.version` in
+`Sources/MouseRecorderCLI/AppIdentity.swift` and add an entry to
+[`docs/RELEASES.md`](docs/RELEASES.md), then commit and push.
+Use stable, strictly increasing `X.Y.Z` versions without prerelease
 suffixes. Do not manually edit the generated stable URL or checksum.
 
 From the committed release source, preview the assets and install locally:
@@ -776,7 +834,7 @@ ruby scripts/test-release.rb
 ./scripts/test.sh
 ./scripts/build.sh
 ruby scripts/prepare-release.rb HEAD dist/preview
-sh scripts/test-homebrew.sh dist/preview/cursor-replay-cli-0.1.0.tar.gz dist/preview/cursor-replay.rb
+sh scripts/test-homebrew.sh dist/preview/cursor-replay-cli-0.2.0.tar.gz dist/preview/cursor-replay.rb
 ```
 
 Use the actual version in the archive filename for subsequent releases.
@@ -797,8 +855,8 @@ archive has actually been published.
 After reviewing the preview, create and push the tag:
 
 ```sh
-git tag -a v0.1.0 -m "Cursor Replay CLI 0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "Cursor Replay CLI 0.2.0"
+git push origin v0.2.0
 ```
 
 The [release workflow](.github/workflows/release.yml) requires the tag to match
